@@ -248,6 +248,10 @@ def validar_accion(accion: dict, datos: dict) -> str | None:
     ramo, fecha = ramo_legible(a["ramo"]), secretaria._fecha(a["fecha"])
     if a["tipo"] == "clase_perdida":
         return f"📝 ¿Anoto que faltaste a {ramo} el {fecha}?"
+    if a["tipo"] == "clase_suspendida":
+        return f"📝 ¿Anoto que la clase de {ramo} del {fecha} se suspendió? No cuenta como clase perdida."
+    if a["tipo"] == "hecho":
+        return f"📝 ¿Marco como hecho, en {ramo}?\n• {a['que']}"
     if a["tipo"] == "pendiente":
         return f"📝 ¿Anoto para el {fecha}, en {ramo}?\n• {a['que']}"
     texto = f"📝 ¿Anoto la {NOMBRES.get(a['evaluacion'], a['evaluacion'])} de {ramo} para el {fecha}?"
@@ -267,6 +271,14 @@ def aplicar_accion(accion: dict) -> str:
             # en /pendientes, sin otra lista que mantener.
             evaluaciones.anotar_pendiente(ramo, fecha, accion["que"].strip(), "chat")
             return f"✅ Anotado para el {secretaria._fecha(fecha)}: {accion['que'].strip()}. Te lo voy a recordar."
+        if accion["tipo"] == "clase_suspendida":
+            evaluaciones.anotar_clase_suspendida(ramo, fecha)
+            return (f"✅ Anotado: no hubo clase de {ramo_legible(ramo)} el {secretaria._fecha(fecha)}. "
+                    "No cuenta como clase perdida.")
+        if accion["tipo"] == "hecho":
+            if not evaluaciones.marcar_hecho(ramo, accion["que"], fecha):
+                return "🤔 Ese pendiente ya no estaba por hacer, así que no cambié nada."
+            return f"✅ Anotado: «{accion['que']}» queda como hecho. Ya no te lo muestro."
         if accion["tipo"] == "clase_perdida":
             evaluaciones.anotar_clase_perdida(ramo, fecha)
             return (f"✅ Anotado: faltaste a {ramo_legible(ramo)} el {secretaria._fecha(fecha)}. "
@@ -321,15 +333,42 @@ def conversar(texto: str, estado: dict, config: dict) -> None:
 
     estado.update(session_id=sesion, ultimo=ahora.isoformat())
     accion, respuesta = separar_accion(respuesta)
-    teclado = None
-    confirmacion = validar_accion(accion, datos) if accion else None
-    if confirmacion:
-        estado["pendiente"] = {"tipo": "accion", "accion": evaluaciones.revisar_accion_del_chat(accion, datos)}
-        respuesta = f"{respuesta}\n\n{confirmacion}".strip()
-        teclado = telegram.botones([("Sí, anótalo", "si"), ("No", "no")])
+    teclado, propuesta = None, None
+    if accion and accion.get("tipo") == "cancelar":
+        # El estudiante corrigio al bot: la propuesta que esperaba un boton se retira.
+        retirada = _retirar_propuesta(estado)
+        respuesta = respuesta or ("👌 Listo, retiré la propuesta. No anoté nada." if retirada
+                                  else "👌 No tengo nada pendiente de confirmar.")
+    else:
+        confirmacion = validar_accion(accion, datos) if accion else None
+        if confirmacion:
+            # Los botones de la propuesta anterior seguirian activos y, al tocarlos,
+            # anotarian la nueva: se quitan antes de mostrar la que reemplaza.
+            _retirar_propuesta(estado)
+            propuesta = {"tipo": "accion", "accion": evaluaciones.revisar_accion_del_chat(accion, datos)}
+            respuesta = f"{respuesta}\n\n{confirmacion}".strip()
+            teclado = telegram.botones([("Sí, anótalo", "si"), ("No", "no")])
+    # Se guarda antes de enviar: si Telegram falla, la conversacion y lo retirado
+    # no se pierden. La propuesta nueva se guarda despues, cuando su mensaje existe.
     _guardar_estado(estado)
     telegram.editar(mid, f"✅ Listo ({segundos} s)")
-    telegram.enviar(respuesta, teclado=teclado)
+    enviado = telegram.enviar(respuesta, teclado=teclado)
+    if propuesta:
+        # El id del mensaje deja retirar sus botones y distinguirlos de los de otra propuesta.
+        estado["pendiente"] = dict(propuesta, mensaje=enviado.get("message_id"))
+        _guardar_estado(estado)
+
+
+def _retirar_propuesta(estado: dict) -> bool:
+    """Saca del estado la accion que espera confirmacion y le quita los botones a su
+    mensaje. False si no habia ninguna."""
+    pendiente = estado.get("pendiente") or {}
+    if pendiente.get("tipo") != "accion":
+        return False
+    estado.pop("pendiente")
+    if pendiente.get("mensaje"):
+        telegram.quitar_botones(pendiente["mensaje"])
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -427,7 +466,12 @@ def atender_comando(comando: str, estado: dict, config: dict) -> None:
 def atender_boton(cb: dict, estado: dict, config: dict) -> None:
     telegram.responder_boton(cb["id"])
     dato, pendiente = cb.get("data", ""), estado.get("pendiente") or {}
-    if dato in ("si", "no") and pendiente.get("tipo") == "accion":
+    # Un boton de una propuesta anterior (retirada, o reemplazada por otra) no
+    # confirma la actual. Telegram siempre trae el id del mensaje del boton.
+    mensaje = (cb.get("message") or {}).get("message_id")
+    if dato in ("si", "no") and pendiente.get("mensaje") and mensaje and mensaje != pendiente["mensaje"]:
+        telegram.enviar("⌛ Ese botón ya no está vigente.")
+    elif dato in ("si", "no") and pendiente.get("tipo") == "accion":
         estado.pop("pendiente")
         _guardar_estado(estado)
         telegram.enviar(aplicar_accion(pendiente["accion"]) if dato == "si"

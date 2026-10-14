@@ -74,7 +74,7 @@ def _evaluaciones(datos: dict, hoy: date, limite: str) -> list[tuple[str, str, s
              for ramo, evs in datos.get("ramos", {}).items() for ev in evs
              if ev.get("fecha") and hoy.isoformat() <= ev["fecha"] <= limite]
     lista += [(p["fecha"], p["ramo"], f"{ramo_legible(p['ramo'])}: {p['que']}", None)
-              for p in datos.get("pendientes", [])
+              for p in evaluaciones.pendientes_activos(datos)
               if hoy.isoformat() <= p.get("fecha", "") <= limite and _ES_EVALUACION.search(p.get("que", ""))]
     return sorted(lista)
 
@@ -87,7 +87,7 @@ def resumen(hoy: date, datos: dict, config: dict, fin_de_semana: bool = False) -
     evals = _evaluaciones(datos, hoy, limite)
     dias = lambda f: (date.fromisoformat(f) - hoy).days
     alertas = [(f, r, nombre, ev) for f, r, nombre, ev in evals if dias(f) in _AVISOS]
-    pedidos = [p for p in datos.get("pendientes", [])
+    pedidos = [p for p in evaluaciones.pendientes_activos(datos)
                if p.get("fecha") == hoy.isoformat() and not _ES_EVALUACION.search(p.get("que", ""))]
 
     # Se lee en el telefono, caminando: un bloque por tema, cada uno con su emoji,
@@ -127,9 +127,9 @@ def resumen(hoy: date, datos: dict, config: dict, fin_de_semana: bool = False) -
 
 def lista_pendientes(datos: dict, hoy: date) -> str:
     """Para /pendientes: lo que falta por hacer, de hoy en adelante, de clases y
-    de reuniones, agrupado por dia. Lo que ya paso no se lista: no hay registro
-    de "hecho"."""
-    futuros = sorted((p for p in datos.get("pendientes", []) if p.get("fecha", "") >= hoy.isoformat()),
+    de reuniones, agrupado por dia. Lo que ya paso no se lista, ni lo que el
+    estudiante marco como hecho."""
+    futuros = sorted((p for p in evaluaciones.pendientes_activos(datos) if p.get("fecha", "") >= hoy.isoformat()),
                      key=lambda p: p["fecha"])
     if not futuros:
         return "🙌 No tienes pendientes anotados de hoy en adelante."

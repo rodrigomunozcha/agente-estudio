@@ -79,7 +79,9 @@ Datos de estado (cuáles quedan fuera de git lo dice `.gitignore`):
 - `orquestador/config.json`: rutas, el ramo, horario y sala de cada día, y el chat de
   Telegram. Su plantilla es `config.example.json`.
 - `orquestador/evaluaciones.json`: S1, S2 y Examen de cada ramo, los `pendientes` (controles,
-  tareas y pedidos con fecha), las `clases_perdidas` y los `feriados`. Cuando dos fuentes
+  tareas y pedidos con fecha, con `estado: hecho` los que el estudiante ya cumplió), las
+  `clases_perdidas`, las `clases_suspendidas` (fecha sin clase, no cuenta como perdida) y los
+  `feriados`. Cuando dos fuentes
   chocan, manda lo que dijo el profesor en clase, después lo que dijo el estudiante por el
   chat y al final el calendario. El pipeline solo anota un anuncio si su cita está en la
   transcripción.

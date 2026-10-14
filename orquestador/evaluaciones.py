@@ -15,7 +15,8 @@ Cuando dos fuentes dicen cosas distintas manda, de mayor a menor, lo que el
 profesor dijo en clase, lo que el estudiante dijo por el chat y el calendario.
 El calendario lo anota a mano una sesion de Claude. Lo de clase llega por
 registrar_clase, y lo del chat y las reuniones por las operaciones de abajo
-(anotar_pendiente, anotar_clase_perdida, fijar_fecha_desde_chat).
+(anotar_pendiente, anotar_clase_perdida, anotar_clase_suspendida, marcar_hecho,
+fijar_fecha_desde_chat).
 
 Este module es el unico que escribe evaluaciones.json (decision del
 08-10-2026, tras la revision de arquitectura). Antes escribian el bot, las
@@ -25,7 +26,8 @@ mismo instante que una clase, uno pisaba lo que anoto el otro. Ahora cada
 escritura lee, cambia y guarda dentro de un candado propio del archivo.
 
 Formato: {"ramos": {"<RAMO como en config.json>": [evaluacion, ...]},
-"clases_perdidas": [{"ramo", "fecha"}]}. Cada evaluacion trae nombre, fecha
+"clases_perdidas": [{"ramo", "fecha"}], "clases_suspendidas": [{"ramo", "fecha"}],
+"pendientes": [...]}. Un pendiente hecho trae "estado": "hecho" y no se borra. Cada evaluacion trae nombre, fecha
 (ISO o null si no esta confirmada), tipo (prueba, trabajo o desconocido),
 acumula y fuente. Las evaluaciones de un ramo van en orden cronologico.
 """
@@ -124,6 +126,47 @@ def anotar_clase_perdida(ramo: str, fecha: str, ensayo: bool = False) -> None:
             perdidas.append({"ramo": ramo, "fecha": fecha})
 
 
+def anotar_clase_suspendida(ramo: str, fecha: str, ensayo: bool = False) -> None:
+    """Una fecha sin clase del ramo (el 14-10-2026 el bot proponia anotar una clase
+    suspendida como perdida, que es falso). No toca clases_perdidas: el estudiante
+    no falto, asi que ni las hojas ni las clases de una evaluacion cambian. Solo
+    proxima_clase la mira, para no dejar un recordatorio en una clase que no hubo."""
+    with _modificando(ensayo=ensayo) as datos:
+        suspendidas = datos.setdefault("clases_suspendidas", [])
+        if not any(p.get("ramo") == ramo and p.get("fecha") == fecha for p in suspendidas):
+            suspendidas.append({"ramo": ramo, "fecha": fecha})
+
+
+def _mismo_texto(a: str, b: str) -> bool:
+    return _normalizar(a) == _normalizar(b)
+
+
+def _pendiente_a_cerrar(datos: dict, ramo: str, que: str, fecha: str | None) -> dict | None:
+    """El unico pendiente sin hacer que calza con lo que dijo el estudiante. Si el
+    ramo y el texto calzan con varios (mismo control en dos fechas) y no vino la
+    fecha, ninguno: marcar el equivocado esconderia algo que falta por hacer."""
+    candidatos = [p for p in pendientes_activos(datos)
+                  if p.get("ramo") == ramo and _mismo_texto(p.get("que", ""), que)
+                  and (fecha is None or p.get("fecha") == fecha)]
+    return candidatos[0] if len(candidatos) == 1 else None
+
+
+def marcar_hecho(ramo: str, que: str, fecha: str | None = None, ensayo: bool = False) -> bool:
+    """Marca un pendiente como hecho. No se borra: /pendientes y la secretaria
+    solo muestran los que faltan. False si ya no hay uno que calce."""
+    with _modificando(ensayo=ensayo) as datos:
+        p = _pendiente_a_cerrar(datos, ramo, que, fecha)
+        if p is None:
+            return False
+        p["estado"] = "hecho"
+    return True
+
+
+def pendientes_activos(datos: dict) -> list[dict]:
+    """Los pendientes que faltan por hacer. Los antiguos no traen estado: faltan."""
+    return [p for p in datos.get("pendientes", []) if p.get("estado") != "hecho"]
+
+
 def fijar_fecha_desde_chat(ramo: str, evaluacion: str, fecha: str, ensayo: bool = False) -> None:
     """Lo que el estudiante dijo por el chat pisa al calendario y a un anuncio
     dudoso. La confirmacion ya le advirtio si el profesor dijo otra cosa en clase."""
@@ -143,11 +186,19 @@ def revisar_accion_del_chat(accion: dict, datos: dict) -> dict | None:
     es cosa del bot.
     """
     tipo, ramo = accion.get("tipo"), accion.get("ramo")
-    evs = datos.get("ramos", {}).get(ramo)
     fecha = validar_fecha(accion.get("fecha"))
+    if tipo == "hecho":
+        # Antes que el chequeo del ramo: los pendientes de una reunion tienen como
+        # ramo "REUNIÓN", que no esta entre los ramos con evaluaciones.
+        que = accion.get("que")
+        if not isinstance(que, str) or not _normalizar(que) or len(que) > 200:
+            return None
+        p = _pendiente_a_cerrar(datos, ramo, que, fecha if accion.get("fecha") else None)
+        return {"tipo": tipo, "ramo": ramo, "fecha": p["fecha"], "que": p["que"]} if p else None
+    evs = datos.get("ramos", {}).get(ramo)
     if not evs or not fecha:
         return None
-    if tipo == "clase_perdida":
+    if tipo in ("clase_perdida", "clase_suspendida"):
         return {"tipo": tipo, "ramo": ramo, "fecha": fecha}
     if tipo == "fecha_evaluacion":
         ev = next((e for e in evs if e["nombre"] == accion.get("evaluacion")), None)
@@ -317,6 +368,12 @@ def proxima_clase(fecha_clase: str, dia_semana: int, feriados: list[str]) -> str
     return d.isoformat()
 
 
+def fechas_sin_clase(datos: dict, ramo: str) -> list[str]:
+    """Los feriados y las clases suspendidas del ramo: los dias en que no hay clase."""
+    return datos.get("feriados", []) + [s["fecha"] for s in datos.get("clases_suspendidas", [])
+                                         if s.get("ramo") == ramo]
+
+
 def aplicar_pedidos(datos: dict, ramo: str, avisos: list, fecha_clase: str,
                     transcripcion: str, dia_semana: int | None) -> list[str]:
     """
@@ -339,7 +396,7 @@ def aplicar_pedidos(datos: dict, ramo: str, avisos: list, fecha_clase: str,
             continue
         fecha = validar_fecha(a.get("fecha"))
         if fecha is None and a.get("para_la_proxima_clase") is True and dia_semana is not None:
-            fecha = proxima_clase(fecha_clase, dia_semana, datos.get("feriados", []))
+            fecha = proxima_clase(fecha_clase, dia_semana, fechas_sin_clase(datos, ramo))
         if fecha is None or fecha <= fecha_clase:
             continue
         if any((x.get("ramo"), x.get("fecha"), x.get("que")) == (ramo, fecha, a["que"]) for x in pendientes):

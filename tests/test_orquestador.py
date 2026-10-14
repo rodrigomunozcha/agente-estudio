@@ -2698,10 +2698,12 @@ def probar_bot_de_telegram() -> None:
         destino.write_bytes(b"foto")
         return destino
 
+    quitados = []
     tg = b.telegram
     originales = (tg.enviar, tg.editar, tg.escribiendo, tg.responder_boton, tg.descargar,
-                  b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config)
+                  b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.quitar_botones)
     tg.enviar, tg.editar = enviar, (lambda mid, texto, chat_id=None: editados.append(texto))
+    tg.quitar_botones = lambda mid, chat_id=None: quitados.append(mid)
     tg.escribiendo, tg.responder_boton, tg.descargar = (lambda *a: None), (lambda *a: None), descargar
     b._preguntar, b.RUTA_ESTADO = preguntar_falso, base / "bot_estado.json"
     ev.RUTA, od.COPIADOR, b.cargar_config = base / "evaluaciones.json", copiador, (lambda: config)
@@ -2712,6 +2714,13 @@ def probar_bot_de_telegram() -> None:
 
     def boton(dato):
         return {"callback_query": {"id": "x", "data": dato, "message": {"chat": {"id": 1}}}}
+
+    def boton_en(dato, mid):
+        # Telegram trae el id del mensaje donde se toco el boton.
+        return {"callback_query": {"id": "x", "data": dato, "message": {"chat": {"id": 1}, "message_id": mid}}}
+
+    def accion(**campos):
+        return "ACCION: " + json.dumps({"ramo": ramo, **campos}, ensure_ascii=False)
 
     try:
         b.atender(mensaje("¿qué es la elasticidad?"), 1)
@@ -2794,6 +2803,85 @@ def probar_bot_de_telegram() -> None:
         check("y el prompt fijo sigue trayendo horario y rutas",
               "## Horario de clases" in respuesta["system"] and "## Rutas que puedes leer" in respuesta["system"])
 
+        # --- La secretaria: tono, clase suspendida, cancelar y marcar hecho ---
+        tipos = ("clase_perdida", "clase_suspendida", "fecha_evaluacion", "pendiente", "hecho", "cancelar")
+        check("las instrucciones ofrecen las seis acciones y las reglas de secretaria",
+              all(f'"tipo": "{t}"' in respuesta["system"] for t in tipos)
+              and "No especules" in respuesta["system"] and "No digas \"Anotado\"" in respuesta["system"])
+
+        respuesta["texto"] = accion(tipo="clase_suspendida", fecha="2026-10-12")
+        b.atender(mensaje("se suspendió la clase de hoy"), 1)
+        texto, teclado = enviados[-1]
+        check("una clase suspendida se propone como suspendida, sin decir que faltaste, y sin relleno",
+              "se suspendió" in texto and "faltaste" not in texto and teclado is not None
+              and texto.startswith("📝"), texto)
+        b.atender(boton_en("si", len(enviados)), 1)
+        datos_ev = ev.cargar()
+        check("y queda como fecha sin clase, sin tocar las clases perdidas",
+              datos_ev["clases_suspendidas"] == [{"ramo": ramo, "fecha": "2026-10-12"}]
+              and datos_ev["clases_perdidas"] == [{"ramo": ramo, "fecha": "2026-10-05"}]
+              and "Anotado" in enviados[-1][0], str(enviados[-1]))
+        pedido = {"que": "Traer el caso leído", "seguro": True, "para_la_proxima_clase": True,
+                  "textual": "para la próxima clase traigan el caso leído"}
+        ev.registrar_clase(ramo, [], [pedido], "2026-10-05", "dijo para la próxima clase traigan el caso leído ok", 0)
+        fechas = [x["fecha"] for x in ev.cargar()["pendientes"] if x["que"] == "Traer el caso leído"]
+        check("lo pedido para la próxima clase salta la clase suspendida", fechas == ["2026-10-19"], str(fechas))
+
+        respuesta["texto"] = accion(tipo="pendiente", fecha="2036-11-02", que="Entrega 1")
+        b.atender(mensaje("hay una entrega el 2"), 1)
+        propuesta = len(enviados)
+        respuesta["texto"] = 'ACCION: {"tipo": "cancelar"}'
+        b.atender(mensaje("no, esa no era"), 1)
+        check("cancelar retira la propuesta, le quita los botones y avisa que no anotó nada",
+              quitados[-1] == propuesta and "No anoté nada" in enviados[-1][0]
+              and "pendiente" not in json.loads(b.RUTA_ESTADO.read_text()), f"{quitados} {enviados[-1]}")
+        b.atender(boton_en("si", propuesta), 1)
+        check("y tocar ese botón después no anota nada",
+              "ya no está vigente" in enviados[-1][0]
+              and not [x for x in ev.cargar()["pendientes"] if x["que"] == "Entrega 1"])
+        b.atender(mensaje("no, esa no era"), 1)
+        check("cancelar sin nada que cancelar lo dice", "nada pendiente" in enviados[-1][0], enviados[-1][0])
+
+        respuesta["texto"] = accion(tipo="pendiente", fecha="2036-11-02", que="Entrega 1")
+        b.atender(mensaje("hay una entrega el 2"), 1)
+        primera = len(enviados)
+        respuesta["texto"] = accion(tipo="pendiente", fecha="2036-11-09", que="Entrega 2")
+        b.atender(mensaje("perdón, era el 9"), 1)
+        segunda = len(enviados)
+        check("una propuesta nueva le quita los botones a la anterior", quitados[-1] == primera, str(quitados))
+        b.atender(boton_en("si", primera), 1)
+        check("y el botón de la anterior no confirma la nueva",
+              "ya no está vigente" in enviados[-1][0]
+              and not [x for x in ev.cargar()["pendientes"] if x["que"].startswith("Entrega")])
+        b.atender(boton_en("si", segunda), 1)
+        check("pero el de la nueva sí",
+              [x["que"] for x in ev.cargar()["pendientes"] if x["que"].startswith("Entrega")] == ["Entrega 2"])
+
+        ev.anotar_pendiente("REUNIÓN", "2036-11-20", "Mandar el CV", "reunion")
+        respuesta["texto"] = accion(tipo="hecho", que="control 2")
+        b.atender(mensaje("ya hice el control 2"), 1)
+        texto, teclado = enviados[-1]
+        check("marcar un pendiente como hecho pide confirmación, aunque no diga la fecha ni las mayúsculas",
+              "Control 2" in texto and "hecho" in texto and teclado is not None, texto)
+        b.atender(boton_en("si", len(enviados)), 1)
+        dia = _date(2036, 10, 13)
+        check("y deja de salir en /pendientes, pero los otros siguen",
+              "Control 2" not in se.lista_pendientes(ev.cargar(), dia)
+              and "Entrega 2" in se.lista_pendientes(ev.cargar(), dia), se.lista_pendientes(ev.cargar(), dia))
+        texto9, _ = se.resumen(dia, ev.cargar(), config)
+        check("ni lo avisa la secretaria ese día", "Control 2" not in (texto9 or ""), str(texto9))
+        check("se conserva en el archivo, con su estado",
+              [x["estado"] for x in ev.cargar()["pendientes"] if x["que"] == "Control 2"] == ["hecho"])
+        respuesta["texto"] = accion(tipo="hecho", que="Control 2")
+        b.atender(mensaje("ya hice el control 2"), 1)
+        check("uno que ya está hecho no se vuelve a ofrecer", enviados[-1][1] is None)
+        respuesta["texto"] = accion(tipo="hecho", que="Algo que nunca anoté")
+        b.atender(mensaje("ya hice algo"), 1)
+        check("ni uno que no existe", enviados[-1][1] is None)
+        respuesta["texto"] = accion(tipo="hecho", que="Mandar el CV").replace(ramo, "REUNIÓN")
+        b.atender(mensaje("ya mandé el CV"), 1)
+        check("el pendiente de una reunión también se marca", enviados[-1][1] is not None, enviados[-1][0])
+
         foto = {"photo": [{"file_id": "chica"}, {"file_id": "grande", "file_size": 1000}]}
         b.atender(mensaje(**foto), 1)
         check("una foto sin ramo pregunta de que ramo es", "¿De qué ramo es?" in enviados[-1][0])
@@ -2819,7 +2907,7 @@ def probar_bot_de_telegram() -> None:
         check("a cualquier otro chat no le contesta", len(enviados) == antes)
     finally:
         (tg.enviar, tg.editar, tg.escribiendo, tg.responder_boton, tg.descargar,
-         b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config) = originales
+         b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.quitar_botones) = originales
         shutil.rmtree(base, ignore_errors=True)
 
 

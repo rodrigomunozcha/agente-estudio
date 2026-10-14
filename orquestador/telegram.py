@@ -121,6 +121,17 @@ def editar(message_id: int, texto: str, chat_id: int | None = None) -> None:
            text=texto[:MAX_TEXTO])
 
 
+def quitar_botones(message_id: int, chat_id: int | None = None) -> None:
+    """Deja el mensaje como esta pero sin botones, para que una propuesta retirada o
+    reemplazada no se pueda confirmar. Si Telegram no deja (mensaje muy viejo), el bot
+    igual ignora ese botón: ver bot.atender_boton."""
+    try:
+        llamar("editMessageReplyMarkup", chat_id=chat_id or chat_autorizado(), message_id=message_id,
+               reply_markup={"inline_keyboard": []})
+    except (RuntimeError, OSError):
+        pass
+
+
 def escribiendo(chat_id: int | None = None) -> None:
     llamar("sendChatAction", chat_id=chat_id or chat_autorizado(), action="typing")
 
