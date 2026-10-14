@@ -1,0 +1,277 @@
+# Instalación, uso y detalles técnicos
+
+Esta es la guía completa. Si solo quieres entender qué hace el proyecto y ver cómo se ve,
+vuelve al [README](../README.md).
+
+## Antes de empezar: qué necesitas
+
+Revisa esta lista antes de instalar nada. Si te falta algo de aquí, el sistema no va a
+poder hacer su trabajo.
+
+- **Un Mac con Apple Silicon** (M1, M2, M3 o más nuevo). Probado en vivo en un M3.
+- **[Homebrew](https://brew.sh)** instalado (el gestor de paquetes de macOS).
+- **ffmpeg**, instalado con Homebrew:
+  ```bash
+  brew install ffmpeg
+  ```
+- **Python 3.13**, instalado desde [python.org](https://www.python.org/downloads/) (no
+  el que trae macOS por defecto). Este proyecto asume que queda en:
+  `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3` (la ruta estándar del
+  instalador oficial). Si en tu Mac queda en otro lado, ver la sección
+  "Si algo no funciona" más abajo.
+- **Node.js** (22 o más nuevo), instalado con Homebrew o desde
+  [nodejs.org](https://nodejs.org).
+- **Una cuenta de Claude con plan Pro (o superior)**, para poder iniciar sesión en
+  Claude Code sin pagar por uso de API.
+- **[terminal-notifier](https://github.com/julienXX/terminal-notifier)**, instalado con
+  Homebrew:
+  ```bash
+  brew install terminal-notifier
+  ```
+- **Un vault de Obsidian** ya creado en algún lado de tu Mac (o de iCloud/OneDrive).
+- **Una herramienta propia de transcripción local** (Whisper corriendo en tu Mac) que
+  exponga una función `transcribe(ruta_audio, language_profile, context_text)`. Este
+  repo se apoya en una herramienta separada del autor original para ese paso (no incluida
+  aquí). Si no tienes una propia, necesitas adaptar `orquestador/transcripcion.py` para
+  que llame a la tuya.
+
+## Instalación
+
+1. Clona este repositorio y entra a la carpeta:
+   ```bash
+   git clone <url-de-este-repo> "Claude Code"
+   cd "Claude Code"
+   ```
+2. Instala las dependencias de Node (el motor de Claude Code):
+   ```bash
+   npm install
+   ```
+3. Instala las dependencias de Python:
+   ```bash
+   /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m pip install -r requirements.txt
+   ```
+4. Inicia sesión en Claude Code con tu cuenta Pro (una sola vez):
+   ```bash
+   node_modules/.bin/claude
+   ```
+   Sigue el flujo de login que te muestre. Puedes cerrar esa sesión con `/exit` apenas
+   confirme que quedaste conectado.
+5. Compila las dos apps de doble clic:
+   ```bash
+   bash boton_app/compilar_apps.sh
+   ```
+   Las apps no vienen incluidas en el repositorio a propósito: macOS pone en cuarentena
+   cualquier app descargada de internet (daría el error "no se puede abrir porque el
+   desarrollador no puede verificarse"), y además un `.app` es un binario que no puedes
+   revisar. Al compilarlas aquí, en tu Mac, no pasan por esa cuarentena, y lo que
+   descargaste fue el código fuente (`boton_app/*.applescript`, unas 30 líneas cada uno)
+   que sí puedes leer antes de ejecutar.
+
+   Cuando terminen de compilarse, puedes arrastrar ambas al Dock.
+6. Comprueba que la instalación quedó bien:
+   ```bash
+   /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 tests/test_orquestador.py
+   ```
+   Tarda unos segundos y no toca nada tuyo: no transcribe, no llama a la IA, no escribe
+   en tu vault, así que no gasta nada de tu plan. Si termina diciendo "Todas
+   las pruebas pasaron", las piezas están en su sitio. Si alguna falla, el nombre de la
+   que falló te dice qué revisar antes de seguir.
+
+## Primer uso: configurar tus ramos y carpetas
+
+Dentro de la carpeta `boton_app/` hay una app llamada **"Configurar Sistema"**. Haz
+doble clic en ella. Se va a abrir una ventana de Terminal sola, con un asistente que te
+va preguntando (con Enter aceptas el valor sugerido entre corchetes):
+
+- Dónde están tus carpetas `Input`, `Output` y `Procesados` (los valores por defecto ya
+  apuntan dentro de este mismo proyecto, normalmente no hace falta cambiarlos).
+- La ruta de tu vault de Obsidian.
+- La ruta de tu herramienta de transcripción.
+- La fecha de inicio de tu semestre (el lunes de la primera semana de clases).
+- El nombre del ramo para cada día de la semana (lunes a viernes), y en qué idioma se
+  dicta cada uno.
+
+Puedes volver a abrir esta misma app cuando quieras cambiar cualquiera de estos datos
+(otro semestre, un ramo nuevo, cambiaste de vault). No borra nada de lo ya procesado.
+
+## Uso diario
+
+1. Deja tu grabación (`.m4a`, `.mp3` o `.wav`) en la carpeta `Input/`, o directamente
+   arrástrala sobre el ícono de **"Procesar Clases"** (dentro de `boton_app/`): la copia
+   sola a `Input/` y empieza a procesar.
+2. Si ya la dejaste en `Input/` a mano, solo haz doble clic en **"Procesar Clases"**.
+3. Se abre una ventana con todas las grabaciones que encontró y a qué ramo va cada una.
+   Lo que ya está bien no necesita que toques nada: aprietas Procesar y listo. Lo que el
+   sistema no reconoció aparece para que lo elijas de la lista, o escribas un ramo nuevo
+   que queda guardado para la próxima.
+4. Espera la notificación. Puede tardar unos minutos (transcribir + aplicar el método de
+   estudio). Vas a recibir avisos de progreso y uno final con el nombre de la clase; si
+   haces clic en la notificación final, se abre la hoja de repaso en el navegador.
+
+Todas las preguntas ocurren en el paso 3, antes de que empiece el trabajo pesado. Después
+de apretar Procesar puedes irte: no va a haber más interrupciones.
+
+Si te vas sin contestar esa ventana, a los 10 minutos se cierra sola y no descarta nada:
+las grabaciones que el sistema reconoció se procesan igual, y las que no quedan en
+`Input/` esperando el próximo clic.
+
+Todo lo que pasó queda también anotado en `Estado.txt` (en la raíz del proyecto), por si
+te lo perdiste o quieres confirmar que no quedó pegado. Se abre con doble clic, como
+cualquier archivo de texto.
+
+### Grabaciones que no son una clase del horario
+
+El ramo sale del nombre que le pusiste al archivo. Si escribes
+`Historia contemporánea 24.08.26.m4a`, el sistema reconoce el ramo aunque lo hayas escrito
+con otra tilde, en singular o con una letra de más. El día de la semana solo se usa cuando
+el nombre no dice nada (`Nota de voz 3.m4a`).
+
+Eso deja lugar para grabar cosas que no son clases: una charla, una ayudantía o
+la reunión de un ramo anexo. Nómbralas por lo que son
+(`Reunión de coordinación 30.08.m4a`) y déjalas en `Input/` como cualquier otra.
+
+Como el nombre no corresponde a ningún ramo conocido, el sistema se detiene y te pregunta
+qué hacer con ella, en vez de archivarla bajo la clase de ese día. Puedes elegir uno de
+tus ramos, crear uno nuevo ahí mismo (queda guardado para la próxima), o dejarla solo
+transcrita.
+
+Los ramos creados así no tienen día fijo, y sus grabaciones se numeran por orden
+cronológico entre las ya archivadas de ese ramo, no por semana de semestre. Puedes
+procesarlas en cualquier orden y la numeración se acomoda sola.
+
+### Ver cómo va, y detenerlo si hace falta
+
+Mientras se procesa una clase aparece un ícono en la barra superior del Mac, junto al
+reloj. Muestra en qué paso va (de 4), cuánto lleva y una estimación de lo que falta.
+Desaparece solo al terminar.
+
+La estimación solo se da donde hay con qué calcularla: la transcripción se estima desde
+la duración del audio y la velocidad medida en tus corridas anteriores; las etapas de IA
+usan el promedio de tu propio historial. Si todavía no hay datos, no muestra un número
+en vez de inventarlo.
+
+Al hacer clic en el ícono también aparece **"Detener y deshacer todo"**. No solo corta el
+proceso: revierte lo que se haya alcanzado a hacer (las notas escritas y la hoja
+generada) y devuelve tu grabación a donde estaba, sin procesar.
+Queda como si nunca hubieras hecho clic.
+
+Hay unos pocos segundos, mientras se guarda el audio en su carpeta definitiva, en los que
+detener podría dejar el archivo a medio camino. Durante ese rato el botón se muestra en
+gris explicando por qué, y si pides detener justo ahí, se aplica apenas termina.
+
+Si el Mac se apaga en mitad de un procesamiento, la corrida queda a medias. Se deshace con:
+
+```bash
+python3 -m orquestador.bitacora
+```
+
+## Revisar que todo siga funcionando
+
+El sistema se apoya en herramientas que se actualizan por fuera (ffmpeg y
+terminal-notifier vienen de Homebrew, el motor de Claude Code de npm). Una
+actualización puede romper algo sin aviso. Después de un `brew upgrade`, un
+`npm update` o una actualización de macOS, conviene correr:
+
+```bash
+/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m orquestador.verificar
+```
+
+Va con la ruta completa. Si tienes un Python de Homebrew, `python3` a secas apunta a ese,
+que no tiene los paquetes del pipeline, y la revisión marca todo como roto aunque el
+sistema esté sano.
+
+Comprueba que todo esté en su lugar y responda. Del modelo solo gasta una pregunta
+mínima, para confirmar que tu sesión de Claude siga activa. Distingue entre lo que
+impide procesar clases y lo que es solo un aviso.
+
+## Si algo no funciona
+
+- **La app no hace nada al hacer doble clic:** confirma que tu Python 3.13 está
+  instalado en la ruta esperada. Si lo tienes en otro lado, edita la línea
+  `property python3 : "..."` al principio de `boton_app/ProcesarClases.applescript` y
+  de `boton_app/ConfigurarSistema.applescript` con la ruta real de tu `python3` (la
+  puedes ver con `which python3` en Terminal), y vuelve a compilarlas:
+  ```bash
+  bash boton_app/compilar_apps.sh
+  ```
+- **"Ya hay algo corriendo":** hubo un clic mientras otro procesamiento seguía en curso.
+  Espera a que termine y vuelve a intentar.
+- **"Todavía copiando":** el archivo de audio parece seguir transfiriéndose (por
+  ejemplo, un AirDrop grande). Espera un momento y haz clic de nuevo.
+- **Un error puntual en una clase:** revisa `orquestador/logs/errores.log` (o haz clic en
+  la notificación de error, te lleva directo ahí).
+- **Moviste una carpeta de ramo dentro del vault:** no hay que hacer nada. El sistema
+  recuerda dónde está la carpeta de cada ramo (en `config.json`, bajo `carpetas_ramo`),
+  y si la ruta guardada ya no existe, la vuelve a buscar sola. Si un ramo todavía no
+  tiene carpeta, la crea al lado de las de los otros ramos.
+
+## Si vas a publicar tu propia copia
+
+- **Tu email queda público y para siempre en el historial de commits.** Antes del primer
+  commit, conviene usar el email anónimo que ofrece GitHub (lo encuentras en
+  Settings -> Emails -> "Keep my email addresses private", con la forma
+  `12345+usuario@users.noreply.github.com`):
+  ```bash
+  git config user.email "TU_ID+TU_USUARIO@users.noreply.github.com"
+  ```
+- **Revisa que `config.json` siga ignorado** antes de publicar (`git status` no debe
+  mencionarlo). Contiene las rutas reales de tu Mac.
+
+## Detalles técnicos
+
+### Sobre el paso automático con IA
+
+El paso que aplica el método de estudio corre de forma desatendida (nadie está mirando
+para aprobar permisos), y trabaja sobre texto transcrito de audio, que no es una fuente
+confiable. Por eso esa llamada está acotada de tres formas: no puede ejecutar comandos
+de shell, solo puede leer y escribir dentro de este proyecto y de tu vault de Obsidian, y
+tiene un tope de turnos para no consumir cuota sin control. Si cambias esa configuración
+(en `orquestador/skill_runner.py`), ten presente que quitar una herramienta de
+`allowed_tools` no basta para bloquearla: hace falta `disallowed_tools`.
+
+### La revisión
+
+Como nadie mira el material antes de que entre a tu vault y se condense en la hoja, hay una segunda
+llamada que lo revisa (`orquestador/revisor.py`). Es una corrida aparte, no una
+autocrítica dentro de la misma sesión: llega sin haber escrito nada y compara las notas
+contra la transcripción cruda. Busca contenido inventado, reconstrucciones presentadas
+como textuales, huecos tapados y respuestas modelo que contradicen la clase. No corrige
+ni escribe: solo puede leer.
+
+Si encuentra algo de gravedad alta (contenido que la transcripción no respalda), se
+retoma la sesión original de la skill para que corrija sus propias notas. Los hallazgos
+de gravedad media quedan anotados en
+`orquestador/transcripciones_pendientes/<clase>_revision.json` y no disparan una
+corrección: siempre hay algo que mejorar, y corregir por cada detalle duplicaría el costo
+de cada clase.
+
+Toda esta etapa es opcional por diseño. Si la revisión falla, la clase se termina de
+procesar igual con lo que escribió la skill, y recibes un aviso de que quedó sin revisar.
+
+### El diseño de las notas y de la hoja
+
+`.claude/skills/transcripciones-a-conocimiento/references/diseno-documento.md` fija la
+estructura de la nota de aprendizaje, qué se destaca y qué se corta, con la evidencia
+detrás de cada regla. La idea que manda: cada cosa se cuenta una sola vez. Explicar la
+misma materia con varios envoltorios no refuerza, desplaza a lo que sí rinde.
+
+La hoja de repaso tiene su propio diseño en `orquestador/plantilla_hoja/`: los estilos y
+las instrucciones que recibe el modelo. Si lo cambias, puedes rehacer la hoja de una clase
+ya procesada sin volver a transcribir ni a analizar nada:
+
+```bash
+/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m orquestador.hoja_html
+```
+
+Sin argumentos te lista las clases disponibles. Cada hoja cuesta una llamada al modelo.
+Por defecto escribe una copia al lado y no toca la hoja que ya tenías. Con `--pisar` la
+reemplaza.
+
+### Cuánto consume
+
+Cada llamada al modelo queda anotada en `orquestador/logs/uso.jsonl`. Para ver el
+promedio por etapa después de unas cuantas clases:
+
+```bash
+/Library/Frameworks/Python.framework/Versions/3.13/bin/python3 -m orquestador.uso
+```

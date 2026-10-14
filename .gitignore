@@ -1,0 +1,80 @@
+# Entorno de Python
+__pycache__/
+*.pyc
+
+# Configuracion personal (rutas propias de este Mac). Ver orquestador/config.example.json
+orquestador/config.json
+
+# Contenido real: grabaciones, notas generadas y audios ya archivados
+/Input/
+/Output/
+/Procesados/
+
+# Originales sin comprimir que comprimir_notas_voz.py aparta al convertir a
+# AAC. Nunca los borra: quedan aca para que el estudiante los borre el mismo.
+/Grabaciones ya procesadas y por borrar/
+
+# Lo que queda de una revision manual y hay que mirar antes de tirar: sandboxes
+# de ensayo (traen notas derivadas de una clase real), archivos sueltos que se
+# sacaron del repositorio y lo que una corrida detenida alcanzo a dejar en la
+# carpeta del ramo (ver bitacora.py). Mismo criterio que la carpeta de arriba:
+# nada se borra solo, se deja a mano para que el estudiante decida.
+/Para revisar y borrar/
+
+# Preparaciones de clase: derivan del material de cada profesor (sus apuntes,
+# sus diapositivas, la bibliografia del curso), asi que no se publican.
+/Preclases/
+
+# Dependencias de Node (se reinstalan con npm install)
+node_modules/
+
+# Estado de ejecucion y logs, no es codigo (algunos contienen fragmentos reales de transcripciones)
+orquestador/logs/
+orquestador/transcripciones_pendientes/
+orquestador/estado_tamanos.json
+orquestador/trabajos_emitidos.json
+orquestador/orquestador.lock
+# Fechas y alcance de las evaluaciones del semestre. Lo reescriben los anuncios
+# de clase y trae citas textuales del profesor, asi que es estado, no codigo.
+orquestador/evaluaciones.json
+# El candado de evaluaciones.json (evaluaciones._modificando): estado de corrida, vacio.
+orquestador/evaluaciones.lock
+# La conversacion vigente del bot de Telegram y lo que espera un boton.
+orquestador/bot_estado.json
+Estado.txt
+
+# Configuracion local de Claude Code (permisos y rutas propias de este Mac)
+.claude/settings.local.json
+
+# Apps compiladas: se generan en cada Mac con boton_app/compilar_apps.sh.
+# No se suben para que macOS no las ponga en cuarentena al descargarlas, y para
+# que lo que se publica sea el codigo fuente auditable (.applescript), no un binario.
+boton_app/*.app/
+
+# macOS
+.DS_Store
+
+# Binarios de las ventanas nativas: se compilan con compilar_apps.sh, mismo
+# criterio que las apps (codigo fuente auditable, sin cuarentena de macOS).
+barra_menu/BarraEstado
+ventana_confirmacion/ConfirmarGrabaciones
+
+# Estado de la corrida en curso y respaldos del aborto: son de ejecucion.
+orquestador/estado_actual.json
+orquestador/bitacora_actual.json
+orquestador/respaldos_bitacora/
+
+# Respaldo de notas antes de rehacer una clase: contienen material real
+orquestador/respaldo_notas/
+
+# Skill de terceros clonada aparte: tiene su propio repositorio.
+last30days-skill/
+
+# Fuentes que se incrustan en las hojas de repaso (Atkinson Hyperlegible Mono).
+# No se publican: la licencia OFL exige acompanar el archivo con su texto, y ese
+# texto no esta en el repositorio. Sin ellas la hoja usa la monoespaciada del
+# sistema y se ve casi igual. Para tenerlas, dejar los dos .woff2 en esa carpeta.
+orquestador/plantilla_hoja/fuentes/
+
+# Documento de diseño con el horario y las fechas reales de evaluaciones: vive solo en este Mac.
+PROMPT-inicial.md

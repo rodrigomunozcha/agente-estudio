@@ -1,0 +1,55 @@
+{
+  "rutas": {
+    "input": "/Users/tu_usuario/Documents/Claude Code/Input",
+    "output": "/Users/tu_usuario/Documents/Claude Code/Output",
+    "procesados": "/Users/tu_usuario/Documents/Claude Code/Procesados",
+    "vault_obsidian": "/Users/tu_usuario/ruta/a/tu/vault/de/Obsidian",
+    "transcriptotem": "/Users/tu_usuario/ruta/a/Transcriptotem_WebApp_v2"
+  },
+  "semestre": {
+    "fecha_inicio": "2026-08-03"
+  },
+  "ramos": {
+    "lunes": {
+      "nombre": "NOMBRE DEL RAMO DEL LUNES",
+      "perfil_whisper": "es-chile",
+      "inicio": "19:00",
+      "fin": "22:00",
+      "sala": "A101"
+    },
+    "martes": {
+      "nombre": "NOMBRE DEL RAMO DEL MARTES",
+      "perfil_whisper": "es-chile",
+      "inicio": "19:00",
+      "fin": "22:00",
+      "sala": "A101"
+    },
+    "miercoles": {
+      "nombre": "NOMBRE DEL RAMO DEL MIERCOLES",
+      "perfil_whisper": "es-chile",
+      "inicio": "19:00",
+      "fin": "22:00",
+      "sala": "A101"
+    },
+    "jueves": {
+      "nombre": "NOMBRE DEL RAMO DEL JUEVES",
+      "perfil_whisper": "es-chile",
+      "inicio": "19:00",
+      "fin": "22:00",
+      "sala": "A101"
+    },
+    "viernes": {
+      "nombre": "NOMBRE DEL RAMO DEL VIERNES",
+      "perfil_whisper": "es-chile",
+      "inicio": "19:00",
+      "fin": "22:00",
+      "sala": "A101"
+    }
+  },
+  "ramos_adicionales": {},
+  "carpetas_ramo": {},
+  "programas": {
+    "NOMBRE DEL RAMO DEL LUNES": "Programa del ramo.pdf"
+  },
+  "ingesta_wiki": false
+}
