@@ -61,6 +61,12 @@ UMBRAL_COINCIDENCIA = 0.60
 # largo parecido no.
 UMBRAL_PALABRA = 0.85
 
+# Mismo valor que reuniones.RAMO y pregunta_ramo.REUNION. No se importa de
+# reuniones porque carga el SDK de Claude, ni de pregunta_ramo porque esa importa
+# este modulo.
+RAMO_REUNION = "REUNIÓN"
+PREFIJO_REUNION_ONLINE = "reunion online"
+
 RECONOCIDO = "reconocido"
 SIN_SENAL = "sin_senal"
 NO_CALZA = "no_calza"
@@ -169,6 +175,15 @@ def resolver(nombres_archivo: list[str], config: dict) -> tuple[str, dict | None
     resultados = []
     for nombre in nombres_archivo:
         limpio = limpiar_nombre_archivo(Path(nombre).name)
+        # La grabadora de la barra de menu nombra "Reunión Online DD.MM.YY - <tema>".
+        # El tema lo escribe el estudiante y puede traer cualquier palabra, que
+        # bajaria el puntaje de abajo hasta preguntar. El prefijo lo pone el
+        # programa, asi que es una marca segura y va antes que el puntaje. No exige
+        # REUNIÓN en ramos_adicionales: pregunta_ramo ya la ofrece siempre, y un
+        # clon nuevo trae ramos_adicionales vacio (revision del 15-10-2026).
+        if limpio.startswith(PREFIJO_REUNION_ONLINE):
+            resultados.append((RECONOCIDO, RAMO_REUNION))
+            continue
         con_contenido = {
             p for p in _palabras_utiles(limpio) if p not in PALABRAS_SIN_CONTENIDO
         }
@@ -186,7 +201,9 @@ def resolver(nombres_archivo: list[str], config: dict) -> tuple[str, dict | None
         return NO_CALZA, None
     if reconocidos:
         ramo = reconocidos.pop()
-        return RECONOCIDO, {"nombre": ramo, "perfil_whisper": conocidos[ramo]}
+        # Sin perfil propio (REUNIÓN sin configurar), transcripcion usa el de
+        # por defecto.
+        return RECONOCIDO, {"nombre": ramo, "perfil_whisper": conocidos.get(ramo)}
     # Ninguna parte reconocio un ramo. Basta que una traiga palabras reales que
     # no calzan para que valga la pena preguntar.
     if any(estado == NO_CALZA for estado, _ in resultados):

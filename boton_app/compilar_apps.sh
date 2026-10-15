@@ -28,12 +28,47 @@ osacompile -o "Configurar Sistema.app" ConfigurarSistema.applescript
 if command -v swiftc >/dev/null 2>&1; then
   echo "Compilando el icono de la barra de menu..."
   swiftc -O -o ../barra_menu/BarraEstado ../barra_menu/BarraEstado.swift
-  ICONO="  - barra_menu/BarraEstado            (icono de progreso en la barra superior)"
+
+  # La grabadora va dentro de un .app y no como binario suelto: macOS niega el
+  # microfono a un programa sin Info.plist que explique para que lo usa, y los
+  # permisos de microfono y pantalla se recuerdan por el identificador del
+  # bundle. La firma es ad hoc (-s -), sin cuenta de desarrollador. Por eso,
+  # al recompilar, macOS puede volver a pedir los permisos una vez.
+  echo "Compilando la grabadora de reuniones..."
+  APP=../grabadora/Grabadora.app
+  mkdir -p "$APP/Contents/MacOS"
+  swiftc -O -o "$APP/Contents/MacOS/Grabadora" ../grabadora/Grabadora.swift
+  cat > "$APP/Contents/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>local.agente-estudio.grabadora</string>
+	<key>CFBundleName</key>
+	<string>Grabadora</string>
+	<key>CFBundleExecutable</key>
+	<string>Grabadora</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Para grabar tu voz junto con la reunión y procesarla como apuntes.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Para grabar lo que dicen los demás en la reunión y procesarlo como apuntes.</string>
+</dict>
+</plist>
+EOF
+  codesign --force -s - "$APP"
+  ICONO="  - barra_menu/BarraEstado            (icono de progreso en la barra superior)
+  - grabadora/Grabadora.app           (boton para grabar reuniones on-line)"
 else
-  echo "Aviso: swiftc no esta disponible, se omite el icono de la barra de menu."
-  echo "       El sistema funciona igual, solo sin senal visible mientras trabaja."
+  echo "Aviso: swiftc no esta disponible, se omiten el icono de la barra de menu"
+  echo "       y la grabadora de reuniones. El pipeline funciona igual, solo sin"
+  echo "       senal visible mientras trabaja y sin el boton para grabar reuniones."
   echo "       swiftc se instala con: xcode-select --install"
-  ICONO="  (sin icono de barra: falta swiftc)"
+  ICONO="  (sin icono de barra ni grabadora: falta swiftc)"
 fi
 
 echo

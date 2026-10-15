@@ -49,14 +49,24 @@ actividad queda en `Estado.txt`.
 
 ## Cómo encaja todo
 
-Tres LaunchAgents corren solos. Los instalan `launchd/instalar_vigilante.sh` y
-`launchd/instalar_bot.sh`, que arman los `.plist` con las rutas de este Mac.
+Cuatro LaunchAgents corren solos. Los instalan `launchd/instalar_vigilante.sh`,
+`launchd/instalar_bot.sh` y `launchd/instalar_grabadora.sh`, que arman los `.plist`
+con las rutas de este Mac.
 
 | LaunchAgent | Módulo | Cuándo corre |
 |---|---|---|
 | `local.agente-estudio.airdrop` | `vigilar_descargas` | Cuando cambia Descargas (AirDrop), `Input/` o la carpeta `rutas.grabaciones_onedrive`, y cada 10 minutos. Si cambias esas rutas, vuelve a correr `launchd/instalar_vigilante.sh` |
 | `local.agente-estudio.bot` | `bot` | Siempre, esperando mensajes de Telegram |
 | `local.agente-estudio.secretaria` | `secretaria` | Todos los días a las 9:00. Si no hay nada que decir, no escribe |
+| `local.agente-estudio.grabadora` | `grabadora/Grabadora.app` | Siempre, como botón en la barra de menú para grabar reuniones on-line |
+
+La grabadora (`grabadora/Grabadora.swift`) graba el audio del sistema con un tap de Core
+Audio, el micrófono con AVAudioEngine (un tramo nuevo cada vez que macOS cambia de
+micrófono) y, si se pide, la pantalla con ScreenCaptureKit. Al detener, mezcla todo con
+ffmpeg y deja `Reunión Online DD.MM.YY - <tema>.m4a` en Input, donde lo toma el vigilante.
+`ramo_por_nombre` reconoce el prefijo como REUNIÓN. Las pistas sueltas quedan en
+`archivos para borrar/Agente estudio - pistas de la grabadora/`. Se compila con
+`boton_app/compilar_apps.sh` y se instala con `bash launchd/instalar_grabadora.sh`.
 
 El camino de una clase:
 
