@@ -51,7 +51,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-from . import evaluaciones, onedrive, reuniones, secretaria, telegram
+from . import evaluaciones, memoria, onedrive, reuniones, secretaria, telegram
 from .config import cargar_config, guardar_config
 from .hoja_evaluacion import NOMBRES, ramo_legible
 from .hoja_html import HERRAMIENTAS_PROHIBIDAS
@@ -99,7 +99,8 @@ AYUDA = (
     "☀️ A las 9:00 te escribo si el profesor pidió algo para ese día o si viene una evaluación.\n\n"
     "👍👎 Cada respuesta trae dos botones. Si una no te sirvió, toca 👎: así sé qué mejorar.\n\n"
     "🧠 Recuerdo la conversación mientras no pasen 3 horas sin escribir. Con /nuevaconversacion "
-    "la borro antes.\n\n"
+    "la borro antes. Si me cuentas algo que vale la pena recordar, te ofrezco guardarlo en tu "
+    "memoria, y solo lo guardo si me dices que sí.\n\n"
     "👇 Toca Menú para ver los comandos."
 )
 
@@ -137,8 +138,11 @@ def _raices_de_lectura(config: dict) -> list[Path]:
     enteras: solo "Bot de IA" (lo que mando el estudiante) y los PDF de la
     lista blanca de onedrive.elegir_archivos."""
     raices = [Path(p) for p in (config.get("carpetas_ramo") or {}).values()]
+    # De la boveda, solo las reuniones y la wiki (que trae el perfil). El resto tiene
+    # el diario y notas personales que el bot no necesita.
     raices += [Path(config["rutas"]["output"]), evaluaciones.RUTA,
-               Path(config["rutas"]["vault_obsidian"]) / reuniones.CARPETA_BOVEDA]
+               Path(config["rutas"]["vault_obsidian"]) / reuniones.CARPETA_BOVEDA,
+               Path(config["rutas"]["vault_obsidian"]) / memoria.CARPETA_WIKI]
     for ramo in ramos_con_carpeta(config):
         carpeta = onedrive.carpeta_del_ramo(ramo)
         raices.append(carpeta / "Bot de IA")
@@ -160,11 +164,28 @@ def _system_prompt(config: dict, datos: dict, raices: list[Path]) -> str:
     Lo que cambia va ahora en _contexto_del_dia, junto a cada pregunta."""
     return (
         RUTA_INSTRUCCIONES.read_text(encoding="utf-8")
+        + _perfil(config)
         + "\n\n## Horario de clases\n\n" + secretaria.horario(config)
         + "\n\nNombres exactos de los ramos, para la línea ACCION: "
         + ", ".join(datos.get("ramos", {}))
         + "\n\n## Rutas que puedes leer\n\n" + "\n".join(f"- {r}" for r in raices)
     )
+
+
+MAX_PERFIL = 6000  # el perfil tiene un tope de 30 lineas: esto es solo un seguro
+
+
+def _perfil(config: dict) -> str:
+    """El perfil del estudiante, la pagina de la wiki que un hook carga en cada sesion
+    de Claude Code. Va en el prompt fijo, no como ruta: cambia poco, asi que no rompe el
+    cache, y sin el el bot no sabia quien era ni en que procesos estaba."""
+    wiki = Path(config["rutas"]["vault_obsidian"]) / memoria.CARPETA_WIKI
+    try:
+        ruta = next(iter(sorted(wiki.glob(memoria.PREFIJO_RESERVADO + "*.md"))), None)
+        texto = ruta.read_text(encoding="utf-8")[:MAX_PERFIL] if ruta else ""
+    except OSError:
+        texto = ""  # sin OneDrive el bot responde igual, solo sin el perfil
+    return f"\n\n## Quién es (su perfil, de su wiki)\n\n{texto.strip()}" if texto.strip() else ""
 
 
 def _contexto_del_dia(config: dict, datos: dict) -> str:
@@ -245,13 +266,29 @@ def separar_accion(texto: str) -> tuple[dict | None, str]:
     return (accion if isinstance(accion, dict) else None), _ACCION.sub("", texto).strip()
 
 
+def revisar_accion(accion: dict, datos: dict) -> dict | None:
+    """La accion limpia, o None si no tiene sentido. Las reglas viven en quien escribe:
+    evaluaciones para las fechas y pendientes, memoria para los recuerdos."""
+    if accion.get("tipo") == "memoria":
+        try:
+            return {"tipo": "memoria", "recuerdo": memoria.revisar(
+                {"pagina": accion.get("pagina"), "tipo": accion.get("tipo_pagina"), "texto": accion.get("texto")})}
+        except memoria.RecuerdoInvalido:
+            return None
+    return evaluaciones.revisar_accion_del_chat(accion, datos)
+
+
 def validar_accion(accion: dict, datos: dict) -> str | None:
-    """La pregunta de confirmacion, o None si la accion no tiene sentido. Las reglas
-    viven en evaluaciones.revisar_accion_del_chat: aqui solo se redacta el texto.
-    Una accion invalida no se ofrece: se pierde el boton, no la conversacion."""
-    a = evaluaciones.revisar_accion_del_chat(accion, datos)
+    """La pregunta de confirmacion, o None si la accion no tiene sentido (ver
+    revisar_accion): aqui solo se redacta el texto. Una accion invalida no se ofrece:
+    se pierde el boton, no la conversacion."""
+    a = revisar_accion(accion, datos)
     if a is None:
         return None
+    if a["tipo"] == "memoria":
+        # El texto exacto que se va a guardar: el estudiante confirma eso y nada mas.
+        r = a["recuerdo"]
+        return f"🧠 ¿Lo guardo en tu memoria?\n📄 {r['pagina']}\n• {r['texto']}"
     ramo, fecha = ramo_legible(a["ramo"]), secretaria._fecha(a["fecha"])
     if a["tipo"] == "clase_perdida":
         return f"📝 ¿Anoto que faltaste a {ramo} el {fecha}?"
@@ -268,8 +305,14 @@ def validar_accion(accion: dict, datos: dict) -> str | None:
     return texto
 
 
-def aplicar_accion(accion: dict) -> str:
+def aplicar_accion(accion: dict, config: dict) -> str:
     """Anota la accion ya confirmada y devuelve el mensaje para Telegram."""
+    if accion["tipo"] == "memoria":
+        try:
+            pagina = memoria.guardar_recuerdo(config["rutas"]["vault_obsidian"], accion["recuerdo"])
+        except (memoria.RecuerdoInvalido, OSError) as e:
+            return f"⚠️ No pude guardarlo en tu memoria: {e}. No quedó nada a medias."
+        return f"✅ Guardado en tu memoria, en la página {pagina.stem}."
     ramo, fecha = accion["ramo"], accion["fecha"]
     try:
         if accion["tipo"] == "pendiente":
@@ -352,14 +395,14 @@ def conversar(texto: str, estado: dict, config: dict) -> None:
             # Los botones de la propuesta anterior seguirian activos y, al tocarlos,
             # anotarian la nueva: se quitan antes de mostrar la que reemplaza.
             _retirar_propuesta(estado)
-            propuesta = {"tipo": "accion", "accion": evaluaciones.revisar_accion_del_chat(accion, datos)}
+            propuesta = {"tipo": "accion", "accion": revisar_accion(accion, datos)}
             respuesta = f"{respuesta}\n\n{confirmacion}".strip()
     # Se guarda antes de enviar: si Telegram falla, la conversacion y lo retirado
     # no se pierden. La propuesta y la respuesta votable se guardan despues, cuando
     # su mensaje existe.
     _guardar_estado(estado)
     telegram.editar(mid, f"✅ Listo ({segundos} s)")
-    confirmar = [("Sí, anótalo", "si"), ("No", "no")] if propuesta else []
+    confirmar = _botones_confirmar(propuesta["accion"]) if propuesta else []
     enviado = telegram.enviar(respuesta, teclado=telegram.botones(confirmar + VOTOS))
     mensaje = enviado.get("message_id")
     if propuesta:
@@ -369,6 +412,10 @@ def conversar(texto: str, estado: dict, config: dict) -> None:
         {"mensaje": mensaje, "fecha": ahora.isoformat(timespec="seconds"), "pregunta": texto,
          "respuesta": respuesta, "sesion": sesion}]
     _guardar_estado(estado)
+
+
+def _botones_confirmar(accion: dict) -> list[tuple[str, str]]:
+    return [("Sí, guárdalo" if accion.get("tipo") == "memoria" else "Sí, anótalo", "si"), ("No", "no")]
 
 
 def _respuesta(estado: dict, mensaje: int | None) -> dict | None:
@@ -381,7 +428,7 @@ def _teclado(mensaje: int, estado: dict) -> dict | None:
     opciones = []
     pendiente = estado.get("pendiente") or {}
     if pendiente.get("tipo") == "accion" and pendiente.get("mensaje") == mensaje:
-        opciones += [("Sí, anótalo", "si"), ("No", "no")]
+        opciones += _botones_confirmar(pendiente["accion"])
     r = _respuesta(estado, mensaje)
     if r is not None and "voto" not in r:
         opciones += VOTOS
@@ -552,7 +599,7 @@ def atender_boton(cb: dict, estado: dict, config: dict) -> None:
         _guardar_estado(estado)
         if mensaje:
             telegram.cambiar_botones(mensaje, _teclado(mensaje, estado))
-        telegram.enviar(aplicar_accion(pendiente["accion"]) if dato == "si"
+        telegram.enviar(aplicar_accion(pendiente["accion"], config) if dato == "si"
                         else "👌 Listo, no anoté nada.")
     elif dato in ("voto:+", "voto:-"):
         votar(mensaje, dato[-1], estado)

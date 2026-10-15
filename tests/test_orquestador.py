@@ -2938,6 +2938,44 @@ def probar_bot_de_telegram() -> None:
         check("al confirmar se va el Sí/No y quedan los votos",
               cambios[-1][0] == propuesta and datos_de(cambios[-1][1]) == ["voto:+", "voto:-"], str(cambios[-1:]))
 
+        # --- Memoria: perfil, wiki y guardar con confirmacion ---
+        wiki = base / "vault" / "Wiki"
+        wiki.mkdir()
+        (wiki / "Perfil de Alguien.md").write_text("# Perfil\n\nEstudia de noche y busca práctica.", encoding="utf-8")
+        (wiki / "Índice - Wiki.md").write_text("# Índice - Wiki\n\n## Personas y organizaciones\n", encoding="utf-8")
+        (wiki / "Registro - Wiki.md").write_text("# Registro - Wiki\n", encoding="utf-8")
+        respuesta["texto"] = "Hola."
+        b.atender(mensaje("hola"), 1)
+        check("el bot trae el perfil en su prompt fijo y puede leer la wiki",
+              "Estudia de noche y busca práctica." in respuesta["system"]
+              and str(wiki) in respuesta["system"] and wiki in b._raices_de_lectura(config))
+        check("pero no el resto de la bóveda", base / "vault" not in b._raices_de_lectura(config))
+
+        recuerdo = dict(tipo="memoria", pagina="Empresa Ejemplo", tipo_pagina="entidad",
+                        texto="Pasé a la segunda etapa de la práctica, que es un caso grupal")
+        respuesta["texto"] = "Qué bueno.\n" + accion(**recuerdo)
+        b.atender(mensaje("pasé a la segunda etapa en Empresa Ejemplo"), 1)
+        texto, teclado = enviados[-1]
+        check("ofrece guardarlo con un botón, mostrando el texto exacto",
+              "🧠 ¿Lo guardo en tu memoria?\n📄 Empresa Ejemplo\n• Pasé a la segunda etapa" in texto
+              and teclado["inline_keyboard"][0][0]["text"] == "Sí, guárdalo", texto)
+        check("y sin confirmar no escribe nada", not (wiki / "Personas y organizaciones").exists())
+        b.atender(boton_en("si", len(enviados)), 1)
+        guardada = wiki / "Personas y organizaciones" / "Empresa Ejemplo.md"
+        check("al confirmar queda en la wiki, con el índice y el registro",
+              guardada.is_file() and "caso grupal" in guardada.read_text(encoding="utf-8")
+              and "[[Empresa Ejemplo]]" in (wiki / "Índice - Wiki.md").read_text(encoding="utf-8")
+              and "Empresa Ejemplo" in (wiki / "Registro - Wiki.md").read_text(encoding="utf-8")
+              and "Guardado en tu memoria" in enviados[-1][0], enviados[-1][0])
+        respuesta["texto"] = accion(**dict(recuerdo, texto="Mi correo para la práctica es alguien@example.com"))
+        b.atender(mensaje("anota mi correo"), 1)
+        check("un recuerdo con un dato sensible no se ofrece", not confirma(enviados[-1][1]))
+        respuesta["texto"] = accion(**dict(recuerdo, texto="Otra cosa que no quiero guardar"))
+        b.atender(mensaje("algo más"), 1)
+        b.atender(boton_en("no", len(enviados)), 1)
+        check("con No no se guarda nada",
+              "Otra cosa" not in guardada.read_text(encoding="utf-8") and "no anoté nada" in enviados[-1][0])
+
         foto = {"photo": [{"file_id": "chica"}, {"file_id": "grande", "file_size": 1000}]}
         b.atender(mensaje(**foto), 1)
         check("una foto sin ramo pregunta de que ramo es", "¿De qué ramo es?" in enviados[-1][0])
