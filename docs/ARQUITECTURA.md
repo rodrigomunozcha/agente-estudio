@@ -17,8 +17,11 @@ Desde la raíz del repositorio, siempre con el Python 3.13 del instalador oficia
   real.
 - **Una sola prueba:**
   `$PY -c "import sys; sys.path.insert(0, 'tests'); import test_orquestador as t; t.probar_<nombre>(); print(t.fallos)"`
+- **Nombres indefinidos o sin usar:** `$PY -m ruff check --select F orquestador tests`. El hook
+  de commit lo corre sobre los `.py` del commit. Se instala con `$PY -m pip install ruff`.
 - **Salud del sistema** (rutas, Whisper, sesión de Claude): `$PY -m orquestador.verificar`.
-  Hace una llamada mínima al modelo.
+  Hace una llamada mínima al modelo por defecto y otra por cada modelo que el código pide por
+  nombre (`bot.MODELO`, `reuniones.MODELO`).
 - **Ensayo completo contra un sandbox**, sin tocar el vault ni mover audios:
   `$PY -m orquestador.ensayo [<slug>] [--conservar]`. Este sí gasta tokens.
 - **Procesar Input a mano**, lo mismo que hace el vigilante: `$PY -m orquestador.procesar_input`.
@@ -99,7 +102,20 @@ Datos de estado (cuáles quedan fuera de git lo dice `.gitignore`):
 - `orquestador/bot_estado.json`: la sesión del bot, que dura 3 horas, y la acción que espera
   confirmación con un botón. Para leer qué respondió el bot, toma su `session_id` y abre
   `~/.claude/projects/<carpeta del proyecto con guiones>/<session_id>.jsonl`. Las sesiones
-  anteriores están en `logs/uso.jsonl`, etapa `bot`, campo `sesion`.
+  anteriores están en `logs/uso.jsonl`, etapa `bot`, campo `sesion`. Guarda también las
+  últimas 20 respuestas, para que un 👍/👎 sepa a qué pregunta corresponde.
+- `orquestador/preguntas_grabaciones.json`: las grabaciones que esperan que el estudiante
+  diga de qué son (`pregunta_ramo`), con su respuesta cuando llega.
+- `orquestador/propuestas_memoria/`: lo que una reunión ofreció guardar en la wiki, un
+  archivo por oferta, marcado como respondido cuando se toca el botón.
+
+**Solo el bot escucha a Telegram.** Cuando otro proceso (el procesamiento, la secretaria, el
+cierre de una reunión) necesita una respuesta con botones, envía el mensaje y deja lo que
+espera en un archivo de estado. El bot recibe el botón y escribe la respuesta en ese mismo
+archivo. Si dos procesos pueden escribirlo, va con candado (`evaluaciones._modificando`, y
+el mismo patrón en `pregunta_ramo`). Si no, cada uno escribe en un momento distinto
+(`propuestas_memoria/`). Un botón nuevo sigue este patrón: no agregues otro proceso que
+lea `getUpdates`.
 
 Piezas del agente que viven fuera de este repo, con su propio respaldo:
 

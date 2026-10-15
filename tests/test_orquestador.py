@@ -2205,7 +2205,6 @@ def probar_material_de_onedrive() -> None:
     controles, y un contrato en la raiz del semestre.
     """
     print("\n== material de OneDrive, con lista blanca ==")
-    import textwrap
 
     from orquestador import onedrive as od
 
@@ -2282,12 +2281,10 @@ def probar_hoja_por_evaluacion() -> None:
     """
     print("\n== hoja por evaluacion ==")
     import asyncio
-    import textwrap
     from datetime import timedelta
 
     from orquestador import evaluaciones as ev
     from orquestador import hoja_evaluacion as he
-    from orquestador import onedrive as od
 
     hoy = date.today()
     dia = lambda n: (hoy + timedelta(days=n)).isoformat()  # noqa: E731
@@ -2678,13 +2675,11 @@ def probar_bot_de_telegram() -> None:
     """
     print("\n== bot de Telegram ==")
     import json
-    import textwrap
     from datetime import datetime as _dt
     from datetime import timedelta as _td
 
     from orquestador import bot as b
     from orquestador import evaluaciones as ev
-    from orquestador import onedrive as od
 
     base = Path(tempfile.mkdtemp(prefix="bot_"))
     ramo = "RAMO DE PRUEBA"

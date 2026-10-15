@@ -19,7 +19,11 @@ queda en el historial de GitHub aunque después se edite.
 - **Sub-issue de un padre**: `gh issue create --parent <padre> ...`, o `gh issue edit <padre> --add-sub-issue <hijo>`. Sin sub-issues, `Part of #<padre>` al inicio del cuerpo del hijo.
 - **Comentar**: `gh issue comment <número> --body "..."`.
 - **Etiquetas**: `gh issue edit <número> --add-label "..."` y `--remove-label "..."`.
-- **Cerrar**: `gh issue close <número> --comment "..."`.
+- **Cerrar**: un ticket resuelto por un commit se cierra con una línea `Closes #<número>` al
+  final del mensaje del commit. GitHub lo cierra cuando el commit llega, así que un push
+  frenado no deja un issue cerrado con un commit que no existe allá (pasó el 15-10-2026).
+  GitHub no reconoce "Resuelve". Solo lo que no sale de un commit se cierra a mano:
+  `gh issue close <número> --comment "..."`.
 
 ## Pull requests como pedidos
 

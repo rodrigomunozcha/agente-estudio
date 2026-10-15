@@ -42,6 +42,26 @@ if [ -f "$raiz/tests/test_orquestador.py" ] && ! salida=$(cd "$raiz" && /Library
     exit 1
 fi
 
+# Nombres indefinidos o sin usar en los .py del commit (reglas F de ruff). Un import que
+# falta dentro de una prueba solo se veia al correrla: el 14-10-2026 costo tres corridas.
+# Sin ruff instalado se avisa y se sigue, para no frenar un clon nuevo por una herramienta.
+py="/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
+archivos_py=$(git diff --cached --name-only --diff-filter=d -- '*.py')
+if [ -n "$archivos_py" ]; then
+    if "$py" -m ruff --version >/dev/null 2>&1; then
+        if ! salida=$(cd "$raiz" && echo "$archivos_py" | tr '\n' '\0' | xargs -0 "$py" -m ruff check --select F --output-format concise 2>&1); then
+            echo ""
+            echo "Commit detenido: ruff encontró nombres indefinidos o sin usar."
+            echo "$salida" | head -20
+            echo ""
+            echo "Los sin usar se arreglan con: $py -m ruff check --select F --fix <archivo>"
+            exit 1
+        fi
+    else
+        echo "Aviso: ruff no está instalado, no se revisaron nombres indefinidos. Instálalo con: $py -m pip install ruff"
+    fi
+fi
+
 # Las rutas propias de este Mac no salen del Mac. Una ruta absoluta con el
 # usuario real dice el nombre de quien lo usa y como tiene ordenado el
 # computador, y la copia original de este repo es publica. Pasa sin querer: una ruta copiada en un
