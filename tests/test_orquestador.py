@@ -3635,6 +3635,85 @@ def probar_ramo_propuesto_por_la_hora() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_vigilante_de_input_y_onedrive() -> None:
+    """
+    El vigilante toma lo que llega a la carpeta de grabaciones de OneDrive y lo que se
+    deja en Input, ademas de AirDrop. De OneDrive copia la grabacion completa a Input y
+    aparta el original, sin borrarlo. Una grabacion que sigue creciendo no se toma. En
+    Input solo dispara una corrida lo nuevo, nunca lo que ya fallo ni lo que espera una
+    respuesta. Carpetas temporales, y el procesamiento es falso.
+    """
+    print("\n== el vigilante toma Input y OneDrive ==")
+    import json
+
+    from orquestador import pregunta_ramo as pr
+    from orquestador import vigilar_descargas as vd
+
+    base = Path(tempfile.mkdtemp(prefix="vigilante_"))
+    entrada, nube, descargas = base / "Input", base / "Nube", base / "Descargas"
+    for c in (entrada, nube, descargas):
+        c.mkdir()
+    config = {"rutas": {"input": str(entrada), "grabaciones_onedrive": str(nube)}}
+    corridas = []
+    originales = (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
+                  vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.time.sleep)
+    vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS = (lambda: config), descargas, 0
+    vd.procesar_input.main = lambda: corridas.append(sorted(p.name for p in entrada.iterdir()))
+    vd.lock.adquirir_bloqueante, vd.lock.liberar = (lambda: None), (lambda f: None)
+    deteccion.ESTADO_TAMANOS_PATH, pr.RUTA = base / "tamanos.json", base / "preguntas.json"
+    try:
+        (nube / "Clase del martes.m4a").write_bytes(b"audio completo")
+        (nube / "notas.txt").write_text("no es audio")
+        vd.main()
+        check("una grabación de OneDrive se copia entera a Input y se procesa",
+              (entrada / "Clase del martes.m4a").read_bytes() == b"audio completo"
+              and corridas == [["Clase del martes.m4a"]], str(corridas))
+        check("el original queda apartado en OneDrive, no borrado, y lo demás no se toca",
+              (nube / vd.YA_TOMADAS / "Clase del martes.m4a").is_file() and (nube / "notas.txt").is_file()
+              and not (nube / "Clase del martes.m4a").exists())
+
+        creciendo = nube / "Subiendo.m4a"
+        creciendo.write_bytes(b"a")
+        vd.time.sleep = lambda s: creciendo.write_bytes(creciendo.read_bytes() + b"mas")
+        vd.main()
+        vd.time.sleep = originales[-1]
+        check("una grabación que sigue creciendo no se toma",
+              creciendo.exists() and not (entrada / "Subiendo.m4a").exists())
+
+        corridas.clear()
+        vd.main()
+        check("cuando deja de crecer, se toma", corridas == [["Clase del martes.m4a", "Subiendo.m4a"]], str(corridas))
+
+        # Lo que vio la ultima corrida, como lo deja deteccion.actualizar_estables.
+        deteccion.actualizar_estables(entrada)
+        corridas.clear()
+        vd.main()
+        check("lo que ya estaba en Input en la corrida anterior no dispara otra (una clase que falló)",
+              corridas == [], str(corridas))
+
+        (entrada / "Dejada a mano.m4a").write_bytes(b"audio")
+        vd.main()
+        check("un audio dejado a mano en Input se procesa sin abrir la app",
+              len(corridas) == 1 and "Dejada a mano.m4a" in corridas[0], str(corridas))
+
+        corridas.clear()
+        (entrada / "Esperando.m4a").write_bytes(b"audio")
+        pr.RUTA.write_text(json.dumps({"k": {"archivos": [str(entrada / "Esperando.m4a")]}}))
+        deteccion.actualizar_estables(entrada)
+        (entrada / "Esperando.m4a").write_bytes(b"audio que cambio")
+        vd.main()
+        check("ni lo que espera una respuesta por Telegram", corridas == [], str(corridas))
+
+        sin_nube = {"rutas": {"input": str(entrada)}}
+        vd.cargar_config = lambda: sin_nube
+        vd.main()
+        check("sin carpeta de OneDrive configurada sigue funcionando", True)
+    finally:
+        (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
+         vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.time.sleep) = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def probar_enlace_de_calendario() -> None:
     """
     Un evento que sale de una reunion se ofrece con un boton que abre Google

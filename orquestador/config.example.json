@@ -4,7 +4,8 @@
     "output": "/Users/tu_usuario/Documents/Claude Code/Output",
     "procesados": "/Users/tu_usuario/Documents/Claude Code/Procesados",
     "vault_obsidian": "/Users/tu_usuario/ruta/a/tu/vault/de/Obsidian",
-    "transcriptotem": "/Users/tu_usuario/ruta/a/Transcriptotem_WebApp_v2"
+    "transcriptotem": "/Users/tu_usuario/ruta/a/Transcriptotem_WebApp_v2",
+    "grabaciones_onedrive": "/Users/tu_usuario/Library/CloudStorage/OneDrive-Personal/Grabaciones para el agente"
   },
   "semestre": {
     "fecha_inicio": "2026-08-03"

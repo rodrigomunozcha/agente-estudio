@@ -51,7 +51,7 @@ Tres LaunchAgents corren solos. Los instalan `launchd/instalar_vigilante.sh` y
 
 | LaunchAgent | Módulo | Cuándo corre |
 |---|---|---|
-| `local.agente-estudio.airdrop` | `vigilar_descargas` | Cuando llega un audio por AirDrop a Descargas, y cada 10 minutos |
+| `local.agente-estudio.airdrop` | `vigilar_descargas` | Cuando cambia Descargas (AirDrop), `Input/` o la carpeta `rutas.grabaciones_onedrive`, y cada 10 minutos. Si cambias esas rutas, vuelve a correr `launchd/instalar_vigilante.sh` |
 | `local.agente-estudio.bot` | `bot` | Siempre, esperando mensajes de Telegram |
 | `local.agente-estudio.secretaria` | `secretaria` | Todos los días a las 9:00. Si no hay nada que decir, no escribe |
 

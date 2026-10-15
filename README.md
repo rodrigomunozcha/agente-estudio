@@ -25,7 +25,9 @@ Nació el 29-09-2026 como copia de `orquestador-estudio`, que sigue intacto en
 ## Uso diario
 
 - **Una clase:** mándala por AirDrop. Te llega por Telegram cuando termina, en unos 25 a 45 minutos.
-- **Una clase sin AirDrop:** arrastra el audio encima de `boton_app/Procesar Clases.app`, o déjalo en `Input/` y haz doble clic en la app.
+- **Una clase sin AirDrop:** déjala en `Input/`, o guárdala desde el teléfono en la carpeta de
+  OneDrive de `rutas.grabaciones_onedrive`. Se procesa sola cuando el Mac está encendido. El
+  original de OneDrive queda apartado en "Ya tomadas (puedes borrarlas)".
 - **Si el nombre no dice de qué es:** te pregunto por Telegram, con un botón por ramo, `Reunión` y
   `No es una clase`. La grabación espera tu respuesta, y si no contestas te lo recuerdo una vez.
   Con el ramo y la fecha en el nombre (`Microeconomía 05.10.26.m4a`) no pregunto nada.
