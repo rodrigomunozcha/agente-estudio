@@ -140,50 +140,6 @@ def probar_archivado_no_destructivo() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def probar_dialogo_nunca_descarta_solo() -> None:
-    """
-    Descartar una grabacion tiene que costar un clic explicito. Esto ya fallo
-    una vez con una clase real: el timeout y el boton por defecto llevaban los
-    dos a ignorar, y el audio se archivo solo mientras nadie miraba.
-    """
-    print("\n== el dialogo nunca descarta por su cuenta ==")
-    from orquestador import dialogo_no_reconocido as dlg
-
-    original = dlg._mostrar_dialogo_principal
-    casos = [
-        ("timeout o ventana cerrada", None, "solo_transcribir"),
-        ("clic explicito en Ignorar", dlg.OPCION_IGNORAR, "ignorar"),
-        ("clic en Solo transcribir", dlg.OPCION_SOLO_TRANSCRIBIR, "solo_transcribir"),
-    ]
-    try:
-        for nombre, respuesta, esperado in casos:
-            dlg._mostrar_dialogo_principal = lambda _t, _r=respuesta: _r
-            accion = dlg.preguntar_que_hacer({"archivos": [], "fecha": "1970-01-20",
-                                              "dia_semana": "martes"}, {})["accion"]
-            check(f"{nombre} -> {esperado}", accion == esperado, f"dio '{accion}'")
-
-        # Abandonar a mitad de elegir el ramo tampoco puede descartar.
-        dlg._mostrar_dialogo_principal = lambda _t: dlg.OPCION_APLICAR_SKILLS
-        original_ramo = dlg.elegir_ramo
-        dlg.elegir_ramo = lambda _c: None
-        try:
-            accion = dlg.preguntar_que_hacer({"archivos": [], "fecha": "1970-01-20",
-                                              "dia_semana": "martes"}, {})["accion"]
-            check("abandonar la eleccion de ramo -> solo_transcribir",
-                  accion == "solo_transcribir", f"dio '{accion}'")
-        finally:
-            dlg.elegir_ramo = original_ramo
-
-    finally:
-        dlg._mostrar_dialogo_principal = original
-
-    import inspect
-    fuente = inspect.getsource(original)
-    check("el boton por defecto del dialogo no es el que descarta",
-          "default button {_escapar(OPCION_IGNORAR)}" not in fuente
-          and "OPCION_SOLO_TRANSCRIBIR" in fuente)
-
-
 def probar_el_nombre_del_archivo_manda_sobre_el_dia() -> None:
     """
     El caso real que esto arregla: el 26-08-2026 (miercoles) se subieron dos
@@ -278,95 +234,6 @@ def probar_el_nombre_del_archivo_manda_sobre_el_dia() -> None:
     por_dia = deteccion.resolver_ramo_de_grabacion(["Nota de voz 3.m4a"], miercoles, config)
     check("sin nombre util se mantiene el comportamiento de siempre",
           por_dia and por_dia["nombre"] == "BIOLOGÍA CELULAR", f"dio {por_dia}")
-
-
-def probar_pantalla_de_confirmacion() -> None:
-    """
-    La pantalla pregunta por todas las grabaciones juntas antes de empezar, y
-    reemplaza al dialogo de a una por vez. Lo que se prueba es que ningun
-    camino de fallo deje al estudiante peor que antes de que existiera:
-
-    - Sin el binario compilado se sigue por el dialogo viejo, que SI pregunta.
-      Caer a "no hacer nada" seria dejar de preguntar algo que hoy se pregunta.
-    - Con el binario presente pero fallando (no arranca, devuelve basura, vence
-      el tiempo), se procesa lo reconocido y lo dudoso queda para el proximo
-      clic. Es el comportamiento anterior a la pantalla.
-    - Una respuesta invalida no se cree a medias: cae entera al defecto.
-    """
-    print("\n== la pantalla de confirmacion nunca deja al usuario peor ==")
-    from orquestador import pantalla_confirmacion as pc
-
-    config = {
-        "ramos": {"miercoles": {"nombre": "BIOLOGÍA CELULAR", "perfil_whisper": "es-chile"}},
-        "ramos_adicionales": {},
-    }
-    trabajos = [
-        {"clave": "k1", "archivos": ["/x/Biología celular 26.08.26.m4a"],
-         "fecha": "2026-08-26", "dia_semana": "miercoles",
-         "ramo": "BIOLOGÍA CELULAR", "reconocido": True},
-        {"clave": "k2", "archivos": ["/x/Evaluación conocimientos intermedios 26.08.26.m4a"],
-         "fecha": "2026-08-26", "dia_semana": "miercoles", "ramo": None, "reconocido": False},
-    ]
-
-    # La duracion se mide con ffprobe sobre archivos que aqui no existen.
-    original_duracion = pc.duracion_audio_segundos
-    pc.duracion_audio_segundos = lambda _r: None
-    original_binario = pc.BINARIO
-    try:
-        descripcion = pc.describir(trabajos, config)
-        check("describe cada grabacion con el origen de su ramo",
-              descripcion["grabaciones"][0]["origen"] == "nombre"
-              and descripcion["grabaciones"][1]["origen"] is None,
-              str([g["origen"] for g in descripcion["grabaciones"]]))
-        check("ofrece los ramos conocidos para elegir",
-              "BIOLOGÍA CELULAR" in descripcion["ramos"])
-
-        # Sin binario: hay que seguir preguntando por el camino viejo.
-        pc.BINARIO = Path("/no/existe/ConfirmarGrabaciones")
-        check("sin el binario compilado se cae al dialogo de siempre",
-              pc.preguntar(trabajos, config) is None)
-
-        # Con binario, pero la ventana falla o vence el tiempo.
-        pc.BINARIO = original_binario
-        por_defecto = pc._decisiones_por_defecto(descripcion)
-        check("por defecto, lo reconocido se procesa",
-              por_defecto["k1"]["que_hacer"] == pc.PROCESAR)
-        check("por defecto, lo dudoso queda para el proximo clic",
-              por_defecto["k2"]["que_hacer"] == pc.OMITIR)
-
-        # Respuestas que no se pueden creer.
-        invalidas = [
-            ("una clave que no existe", {"accion": "procesar", "decisiones": [
-                {"clave": "inventada", "que_hacer": "procesar", "ramo": "X"}]}),
-            ("una accion desconocida", {"accion": "procesar", "decisiones": [
-                {"clave": "k1", "que_hacer": "borrar_todo"}]}),
-            ("procesar sin ramo", {"accion": "procesar", "decisiones": [
-                {"clave": "k1", "que_hacer": "procesar", "ramo": "  "}]}),
-            ("la ventana se cerro", {"accion": "cerrada"}),
-            ("vencio el tiempo", {"accion": "timeout"}),
-        ]
-        for nombre, respuesta in invalidas:
-            check(f"{nombre} -> se ignora entera",
-                  pc._validar(respuesta, descripcion) is None)
-
-        # Una respuesta valida si se respeta.
-        buena = {"accion": "procesar", "decisiones": [
-            {"clave": "k1", "que_hacer": "procesar", "ramo": "BIOLOGÍA CELULAR"},
-            {"clave": "k2", "que_hacer": "procesar", "ramo": "EIC", "ramo_nuevo": True},
-        ]}
-        validadas = pc._validar(buena, descripcion)
-        check("una respuesta valida se respeta", validadas is not None
-              and validadas["k2"]["ramo"] == "EIC" and validadas["k2"]["ramo_nuevo"])
-
-        # Una grabacion sobre la que la ventana no dijo nada conserva su default.
-        parcial = {"accion": "procesar", "decisiones": [
-            {"clave": "k1", "que_hacer": "omitir"}]}
-        validadas = pc._validar(parcial, descripcion)
-        check("lo que la ventana no menciona conserva su valor por defecto",
-              validadas["k2"]["que_hacer"] == pc.OMITIR, str(validadas))
-    finally:
-        pc.duracion_audio_segundos = original_duracion
-        pc.BINARIO = original_binario
 
 
 def probar_decisiones_de_pantalla_se_aplican() -> None:
@@ -3463,7 +3330,8 @@ def probar_pregunta_de_ramo_por_telegram() -> None:
     from datetime import timedelta as _td
 
     from orquestador import bot as b
-    from orquestador import pantalla_confirmacion as pc
+    import importlib.util
+
     from orquestador import pregunta_ramo as pr
     from orquestador import procesar_input as pi
     from orquestador import transcripcion
@@ -3491,7 +3359,7 @@ def probar_pregunta_de_ramo_por_telegram() -> None:
     telegram_ok = [True]
     tg = b.telegram
     originales = (pr.RUTA, tg.avisar, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.lanzar_procesamiento,
-                  b.RUTA_ESTADO, b.cargar_config, pc.preguntar, transcripcion.construir_trabajos,
+                  b.RUTA_ESTADO, b.cargar_config, transcripcion.construir_trabajos,
                   transcripcion.transcribir_trabajo, transcripcion.notificar_aviso, deteccion.TRABAJOS_EMITIDOS_PATH)
     pr.RUTA = base / "preguntas.json"
     tg.avisar = lambda texto, adjunto=None, teclado=None: telegram_ok[0] and (avisos.append((texto, teclado)) or True)
@@ -3500,8 +3368,6 @@ def probar_pregunta_de_ramo_por_telegram() -> None:
     tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
     b.lanzar_procesamiento = lambda: lanzados.append(1)
     b.RUTA_ESTADO, b.cargar_config = base / "estado.json", (lambda: config)
-    ventanas = []
-    pc.preguntar = lambda *a: ventanas.append(1)
     transcripcion.construir_trabajos = lambda c: [dict(t) for t in trabajos]
     transcripcion.transcribir_trabajo = lambda t, c: transcritos.append(Path(t["archivos"][0]).name) or "texto"
     transcripcion.notificar_aviso = lambda *a: None
@@ -3548,7 +3414,9 @@ def probar_pregunta_de_ramo_por_telegram() -> None:
         check("No es una clase la transcribe sin tratarla como clase",
               "Audio 12.m4a" in transcritos and (base / "Output" / "Sin clasificar").is_dir()
               and not Path(raro["archivos"][0]).exists())
-        check("la ventana del Mac no apareció en ningún camino", ventanas == [])
+        check("la ventana del Mac ya no existe en ningún camino",
+              importlib.util.find_spec("orquestador.pantalla_confirmacion") is None
+              and importlib.util.find_spec("orquestador.dialogo_no_reconocido") is None)
 
         # Recordatorio: una vez, solo pasado el plazo, y no si la grabacion ya no esta.
         tarde = trabajo("Grabación nueva 9.m4a", "2026-10-12")
@@ -3589,7 +3457,7 @@ def probar_pregunta_de_ramo_por_telegram() -> None:
         check("y un clic en la app dice que espera tu respuesta", mac == ["Esperando tu respuesta"], str(mac))
     finally:
         (pr.RUTA, tg.avisar, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.lanzar_procesamiento,
-         b.RUTA_ESTADO, b.cargar_config, pc.preguntar, transcripcion.construir_trabajos,
+         b.RUTA_ESTADO, b.cargar_config, transcripcion.construir_trabajos,
          transcripcion.transcribir_trabajo, transcripcion.notificar_aviso, deteccion.TRABAJOS_EMITIDOS_PATH) = originales
         usar_dir_pendientes(None)
         shutil.rmtree(base, ignore_errors=True)
@@ -3677,7 +3545,9 @@ def probar_vigilante_de_input_y_onedrive() -> None:
     config = {"rutas": {"input": str(entrada), "grabaciones_onedrive": str(nube)}}
     corridas = []
     originales = (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
-                  vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.time.sleep)
+                  vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.YA_TOMADAS,
+                  vd.time.sleep)
+    vd.YA_TOMADAS = base / "para borrar"
     vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS = (lambda: config), descargas, 0
     vd.procesar_input.main = lambda: corridas.append(sorted(p.name for p in entrada.iterdir()))
     vd.lock.adquirir_bloqueante, vd.lock.liberar = (lambda: None), (lambda f: None)
@@ -3689,15 +3559,15 @@ def probar_vigilante_de_input_y_onedrive() -> None:
         check("una grabación de OneDrive se copia entera a Input y se procesa",
               (entrada / "Clase del martes.m4a").read_bytes() == b"audio completo"
               and corridas == [["Clase del martes.m4a"]], str(corridas))
-        check("el original queda apartado en OneDrive, no borrado, y lo demás no se toca",
-              (nube / vd.YA_TOMADAS / "Clase del martes.m4a").is_file() and (nube / "notas.txt").is_file()
+        check("el original queda en archivos para borrar, no borrado, y lo demás no se toca",
+              (vd.YA_TOMADAS / "Clase del martes.m4a").is_file() and (nube / "notas.txt").is_file()
               and not (nube / "Clase del martes.m4a").exists())
 
         creciendo = nube / "Subiendo.m4a"
         creciendo.write_bytes(b"a")
         vd.time.sleep = lambda s: creciendo.write_bytes(creciendo.read_bytes() + b"mas")
         vd.main()
-        vd.time.sleep = originales[-1]
+        vd.time.sleep = originales[-1]  # el sleep de verdad
         check("una grabación que sigue creciendo no se toma",
               creciendo.exists() and not (entrada / "Subiendo.m4a").exists())
 
@@ -3731,7 +3601,8 @@ def probar_vigilante_de_input_y_onedrive() -> None:
         check("sin carpeta de OneDrive configurada sigue funcionando", True)
     finally:
         (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
-         vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.time.sleep) = originales
+         vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.YA_TOMADAS,
+         vd.time.sleep) = originales
         shutil.rmtree(base, ignore_errors=True)
 
 

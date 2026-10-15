@@ -31,8 +31,8 @@ Las otras dos entradas (issue #1, 14-10-2026):
 - La carpeta de OneDrive de config.json (rutas.grabaciones_onedrive), para grabar
   lejos del Mac. La grabacion se copia, no se mueve: puede estar solo en la nube, y
   copiarla la descarga completa. La copia se escribe con un nombre que no es de audio y
-  recien completa toma el suyo, asi nadie toma una a medias. El original pasa a
-  "Ya tomadas (puedes borrarlas)" dentro de esa misma carpeta: nunca se borra.
+  recien completa toma el suyo, asi nadie toma una a medias. El original pasa a la
+  carpeta comun "archivos para borrar" (config.CARPETA_PARA_BORRAR): nunca se borra.
 """
 import shutil
 import subprocess
@@ -40,12 +40,12 @@ import time
 from pathlib import Path
 
 from . import deteccion, lock, pregunta_ramo, procesar_input
-from .config import cargar_config
+from .config import CARPETA_PARA_BORRAR, cargar_config
 from .deteccion import EXTENSIONES_AUDIO
 
 DESCARGAS = Path.home() / "Downloads"
 ESPERA_TAMANO_SEGUNDOS = 3
-YA_TOMADAS = "Ya tomadas (puedes borrarlas)"
+YA_TOMADAS = CARPETA_PARA_BORRAR / "Agente estudio - grabaciones ya tomadas de OneDrive"
 
 
 def llego_por_airdrop(ruta: Path) -> bool:
@@ -100,9 +100,8 @@ def traer_de_onedrive(archivos: list[Path], input_dir: Path) -> list[Path]:
         except OSError:
             continue  # la copia a medias queda como .parcial y la proxima se escribe encima
         parcial.rename(destino)
-        apartadas = p.parent / YA_TOMADAS
-        apartadas.mkdir(exist_ok=True)
-        shutil.move(str(p), _libre(apartadas / p.name))
+        YA_TOMADAS.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(p), _libre(YA_TOMADAS / p.name))
         traidas.append(destino)
     return traidas
 

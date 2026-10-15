@@ -14,7 +14,7 @@ ffmpeg no esta, el audio se archiva igual sin comprimir: no vale la pena
 perder una clase por esto.
 
 El original que se reemplaza NUNCA se borra: comprimir_en_sitio lo mueve a
-"Grabaciones ya procesadas y por borrar/[Ramo]/", para que el estudiante lo
+"archivos para borrar/Agente estudio - grabaciones originales sin comprimir/[Ramo]/", para que el estudiante lo
 borre el mismo cuando quiera. Este pipeline no borra archivos por su cuenta.
 
 Etapa 6 (parte 2), publicar_en_onedrive: cada clase vive en un solo lugar, la

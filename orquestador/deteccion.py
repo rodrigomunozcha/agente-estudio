@@ -225,7 +225,7 @@ def resolver_ramo_de_grabacion(
     """
     El ramo de una grabacion, mirando primero el nombre del archivo y despues
     el calendario. Devuelve None cuando no hay que asumir nada y corresponde
-    preguntar (ver dialogo_no_reconocido.py).
+    preguntar (ver pregunta_ramo.py).
 
     El orden importa y es el arreglo de un caso real: el dia de la semana no
     distingue la clase del miercoles de una reunion grabada el mismo miercoles,

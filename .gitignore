@@ -10,16 +10,8 @@ orquestador/config.json
 /Output/
 /Procesados/
 
-# Originales sin comprimir que comprimir_notas_voz.py aparta al convertir a
-# AAC. Nunca los borra: quedan aca para que el estudiante los borre el mismo.
-/Grabaciones ya procesadas y por borrar/
-
-# Lo que queda de una revision manual y hay que mirar antes de tirar: sandboxes
-# de ensayo (traen notas derivadas de una clase real), archivos sueltos que se
-# sacaron del repositorio y lo que una corrida detenida alcanzo a dejar en la
-# carpeta del ramo (ver bitacora.py). Mismo criterio que la carpeta de arriba:
-# nada se borra solo, se deja a mano para que el estudiante decida.
-/Para revisar y borrar/
+# Lo que el estudiante revisa y borra a mano ya no vive en el repo: va a la carpeta
+# comun "archivos para borrar" de Claude Code (config.CARPETA_PARA_BORRAR).
 
 # Preparaciones de clase: derivan del material de cada profesor (sus apuntes,
 # sus diapositivas, la bibliografia del curso), asi que no se publican.
@@ -63,10 +55,9 @@ boton_app/*.app/
 # macOS
 .DS_Store
 
-# Binarios de las ventanas nativas: se compilan con compilar_apps.sh, mismo
-# criterio que las apps (codigo fuente auditable, sin cuarentena de macOS).
+# Binario del icono de la barra: se compila con compilar_apps.sh, mismo criterio que
+# las apps (codigo fuente auditable, sin cuarentena de macOS).
 barra_menu/BarraEstado
-ventana_confirmacion/ConfirmarGrabaciones
 
 # Estado de la corrida en curso y respaldos del aborto: son de ejecucion.
 orquestador/estado_actual.json

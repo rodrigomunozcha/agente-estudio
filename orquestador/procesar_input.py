@@ -99,7 +99,7 @@ def main(avisar_si_espera: bool = False) -> None:
                 "Procesamiento detenido",
                 "Se deshizo todo: tus grabaciones y tus notas quedaron como estaban. "
                 "Si alcanzaron a escribirse notas nuevas, quedaron en la carpeta "
-                "Para revisar y borrar.",
+                "archivos para borrar, dentro de Claude Code.",
             )
             return
         except Exception:

@@ -14,7 +14,7 @@ grabaciones ya usadas, no toca nada del pipeline de orquestador/.
 
 Este script nunca borra un archivo, ni a mano ni automatico desde
 archivado.py: el original sin comprimir se mueve a
-"Grabaciones ya procesadas y por borrar/<carpeta>/", junto a la raiz del
+"archivos para borrar/Agente estudio - grabaciones originales sin comprimir/<carpeta>/", junto a la raiz del
 proyecto, en una subcarpeta con el nombre de la carpeta que lo contenia (el
 ramo, si viene de Procesados/<Ramo>/). Ahi queda esperando a que el
 estudiante decida borrarlo el mismo. El archivo comprimido en AAC queda en
@@ -34,6 +34,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from .config import CARPETA_PARA_BORRAR
 
 # Solo estos formatos se revisan. mp3 y ogg quedan afuera: llegan ya chicos.
 FORMATOS_ENTRADA = {".wav", ".aiff", ".aif", ".flac", ".m4a", ".caf"}
@@ -55,7 +57,7 @@ UMBRAL_KBPS_PARA_RECOMPRIMIR = 80
 
 # Adonde van los originales que se reemplazan por su version en AAC. Junto a
 # Input/Output/Procesados, para que sea facil de encontrar (ver .gitignore).
-CARPETA_A_BORRAR = Path(__file__).resolve().parent.parent / "Grabaciones ya procesadas y por borrar"
+CARPETA_A_BORRAR = CARPETA_PARA_BORRAR / "Agente estudio - grabaciones originales sin comprimir"
 
 
 def _ffmpeg_disponible() -> bool:
@@ -108,7 +110,7 @@ def _convertir(origen: Path, destino: Path, bitrate: str) -> None:
 
 def _destino_para_borrar(ruta: Path) -> Path:
     """
-    Un nombre libre dentro de Grabaciones ya procesadas y por borrar/<carpeta
+    Un nombre libre dentro de archivos para borrar/Agente estudio - grabaciones originales sin comprimir/<carpeta
     que lo contenia>/. Si dos clases distintas comparten nombre de archivo
     (raro, pero ya paso con clases de un ramo de intercambio, ver
     nombres.py), se numera en vez de pisar el original de la otra.
@@ -127,7 +129,7 @@ def comprimir_en_sitio(ruta: Path, bitrate: str = BITRATE_AAC_DEFAULT) -> tuple[
     """
     Convierte a AAC un audio, dejando el resultado en el mismo lugar y con
     el mismo nombre. El original nunca se borra: se mueve a
-    Grabaciones ya procesadas y por borrar/<carpeta>/.
+    archivos para borrar/Agente estudio - grabaciones originales sin comprimir/<carpeta>/.
 
     Devuelve (peso_original, peso_nuevo, ruta_del_original_movido) si
     convirtio, o None si no habia nada que hacer (ffmpeg no esta, el audio ya
