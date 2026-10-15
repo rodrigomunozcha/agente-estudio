@@ -3177,6 +3177,97 @@ def probar_seguimientos_de_reuniones() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_memoria_en_la_wiki() -> None:
+    """
+    Un recuerdo confirmado queda en la wiki de la boveda con su formato: la pagina con
+    frontmatter y fuente, una linea en el indice y una entrada al final del registro.
+    Nunca borra, nunca toca una nota fuera de la wiki ni las paginas reservadas, y
+    rechaza un recuerdo con un dato sensible. La boveda es temporal.
+    """
+    print("\n== memoria en la wiki ==")
+    from orquestador import memoria as me
+
+    boveda = Path(tempfile.mkdtemp(prefix="boveda_"))
+    wiki = boveda / "Wiki"
+    (wiki / "Temas").mkdir(parents=True)
+    (boveda / "Reuniones").mkdir()
+    (boveda / "Reuniones" / "Reunión - 2036-10-01 - Entrevista.md").write_text("fuente", encoding="utf-8")
+    indice = ("---\ntags:\n  - wiki\n---\n\n# Índice - Wiki\n\n## Temas\n\n### Un ramo\n\n"
+              "- [[Elasticidad]] - cuanto cambia la demanda\n\n## Personas y organizaciones\n\n"
+              "- [[Empresa Antigua]] - ya estaba\n\n## Síntesis\n")
+    (wiki / "Índice - Wiki.md").write_text(indice, encoding="utf-8")
+    (wiki / "Registro - Wiki.md").write_text("# Registro - Wiki\n\n## [2036-10-01] ingesta | Algo\n\nNada.\n",
+                                             encoding="utf-8")
+    hoy = date(2036, 10, 14)
+    try:
+        ruta = me.guardar_recuerdo(boveda, {"pagina": "Empresa Ejemplo", "tipo": "entidad",
+                                            "texto": "Caja de compensación donde postulé a la práctica",
+                                            "fuente": "Reunión - 2036-10-01 - Entrevista"}, hoy)
+        pagina = ruta.read_text(encoding="utf-8")
+        check("crea la página en Personas y organizaciones con el formato de la wiki",
+              ruta == wiki / "Personas y organizaciones" / "Empresa Ejemplo.md"
+              and pagina.startswith("---\nfecha: 2036-10-14\ntipo: entidad\ntags:\n  - wiki\nfuentes:\n"
+                                    '  - "[[Reunión - 2036-10-01 - Entrevista]]"\n---\n')
+              and "## Lo que sabemos\n\n- Caja de compensación donde postulé a la práctica. "
+                  "([[Reunión - 2036-10-01 - Entrevista]])" in pagina
+              and "## Contradicciones y dudas" in pagina, pagina)
+        actual = (wiki / "Índice - Wiki.md").read_text(encoding="utf-8")
+        check("la anota en su sección del índice, sin tocar lo demás",
+              "- [[Empresa Antigua]] - ya estaba\n- [[Empresa Ejemplo]] - Caja de compensación" in actual
+              and "- [[Elasticidad]] - cuanto cambia la demanda" in actual, actual)
+        registro = (wiki / "Registro - Wiki.md").read_text(encoding="utf-8")
+        check("y deja una entrada al final del registro, con el prefijo de la wiki",
+              registro.startswith("# Registro - Wiki\n\n## [2036-10-01] ingesta | Algo")
+              and registro.rstrip().endswith("sacado de [[Reunión - 2036-10-01 - Entrevista]].")
+              and "## [2036-10-14] ingesta | Memoria confirmada por Telegram: Empresa Ejemplo" in registro, registro)
+
+        me.guardar_recuerdo(boveda, {"pagina": "empresa ejemplo", "tipo": "entidad",
+                                     "texto": "La segunda etapa es un caso grupal"}, date(2036, 10, 20))
+        pagina2 = ruta.read_text(encoding="utf-8")
+        check("un recuerdo nuevo de la misma página se agrega sin borrar lo anterior",
+              pagina2.count("- Caja de compensación donde postulé") == 1
+              and "- La segunda etapa es un caso grupal. (contado por Telegram el 20-10-2036)" in pagina2
+              and "actualizada: 2036-10-20" in pagina2 and pagina2.index("caso grupal") < pagina2.index("## Contradicciones"),
+              pagina2)
+        check("y no la repite en el índice",
+              (wiki / "Índice - Wiki.md").read_text(encoding="utf-8").count("[[Empresa Ejemplo]]") == 1)
+
+        me.guardar_recuerdo(boveda, {"pagina": "Costo de oportunidad: idea clave", "tipo": "tema",
+                                     "texto": "Lo que dejas de ganar por elegir otra opción"}, hoy)
+        actual = (wiki / "Índice - Wiki.md").read_text(encoding="utf-8")
+        check("un tema va a Temas, con un nombre que Obsidian admite, y en el índice antes de las secciones de ramo",
+              (wiki / "Temas" / "Costo de oportunidad idea clave.md").is_file()
+              and actual.index("[[Costo de oportunidad idea clave]]") < actual.index("### Un ramo"), actual)
+
+        antes = {p: p.read_text(encoding="utf-8") for p in boveda.rglob("*.md")}
+        rechazados = [
+            {"pagina": "Alguien", "tipo": "entidad", "texto": "Su correo es alguien@example.com"},
+            {"pagina": "Alguien", "tipo": "entidad", "texto": "Su RUT es 12.345.678-9"},
+            {"pagina": "Alguien", "tipo": "entidad", "texto": "Mi cuenta es la 00-000-00000-00"},
+            {"pagina": "Perfil de alguien", "tipo": "tema", "texto": "algo"},
+            {"pagina": "Índice - Wiki", "tipo": "tema", "texto": "algo"},
+            {"pagina": "Reunión - 2036-10-01 - Entrevista", "tipo": "entidad", "texto": "algo"},
+            {"pagina": "Algo", "tipo": "otra cosa", "texto": "algo"},
+            {"pagina": "Algo", "tipo": "tema", "texto": ""},
+        ]
+        fallaron = []
+        for r in rechazados:
+            try:
+                me.guardar_recuerdo(boveda, r, hoy)
+            except me.RecuerdoInvalido:
+                continue
+            fallaron.append(r)
+        check("rechaza datos sensibles, páginas reservadas, notas fuera de la wiki y recuerdos mal formados",
+              fallaron == [], str(fallaron))
+        check("y al rechazar no escribe nada",
+              antes == {p: p.read_text(encoding="utf-8") for p in boveda.rglob("*.md")})
+        check("un monto con puntos no es un dato sensible",
+              me.revisar({"pagina": "P&G", "tipo": "entidad", "texto": "Ahorró 10.000.000.000 de dólares"})["texto"]
+              .startswith("Ahorró"))
+    finally:
+        shutil.rmtree(boveda, ignore_errors=True)
+
+
 def probar_enlace_de_calendario() -> None:
     """
     Un evento que sale de una reunion se ofrece con un boton que abre Google
