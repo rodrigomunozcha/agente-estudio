@@ -3383,6 +3383,51 @@ def probar_reunion_ofrece_memoria() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_fecha_que_trae_el_audio() -> None:
+    """
+    Sin fecha en el nombre, la fecha de la clase sale de la que trae el propio audio y no
+    del archivo en disco, que en OneDrive es la hora de subida. El audio la trae en UTC, y
+    una clase vespertina aqui ya es el dia siguiente en UTC. Audios reales hechos con
+    ffmpeg, que es lo que usa el sistema para leerlos.
+    """
+    print("\n== la fecha que trae el audio ==")
+    import os
+    import shutil as _sh
+    from datetime import datetime as _dt
+
+    if not _sh.which("ffmpeg") or not _sh.which("ffprobe"):
+        print("  (sin ffmpeg en este Mac: se omite)")
+        return
+    base = Path(tempfile.mkdtemp(prefix="fecha_audio_"))
+    subida = _dt(2026, 10, 14, 13, 0).timestamp()
+
+    def audio(nombre, creacion=None):
+        ruta = base / nombre
+        extra = ["-metadata", f"creation_time={creacion}"] if creacion else ["-map_metadata", "-1"]
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.2",
+                        "-c:a", "aac", *extra, str(ruta)], check=True)
+        os.utime(ruta, (subida, subida))  # como si OneDrive la hubiera bajado hoy
+        return ruta
+
+    try:
+        nota_de_voz = audio("Grabación nueva 3.m4a", "2026-10-08T00:30:00.000000Z")
+        grupos = deteccion.agrupar_por_fecha([nota_de_voz])
+        check("una nota de voz sin fecha en el nombre cae el día que se grabó, en la hora de este Mac",
+              list(grupos) == [date(2026, 10, 7)], str(grupos))
+        momento = deteccion.momento_de_grabacion(nota_de_voz)
+        check("y se sabe a qué hora empezó", momento is not None and (momento.hour, momento.minute) == (21, 30),
+              str(momento))
+        con_nombre = audio("Clase 06.10.26.m4a", "2026-10-08T00:30:00.000000Z")
+        check("la fecha del nombre sigue mandando", list(deteccion.agrupar_por_fecha([con_nombre])) == [date(2026, 10, 6)])
+        sin_nada = audio("Grabación nueva 4.m4a")
+        check("sin fecha en el nombre ni en el audio, queda la del archivo",
+              list(deteccion.agrupar_por_fecha([sin_nada])) == [date(2026, 10, 14)])
+        futura = audio("Grabación nueva 5.m4a", "2099-01-01T00:00:00.000000Z")
+        check("una fecha imposible en el audio no se cree", deteccion.momento_de_grabacion(futura) is None)
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def probar_enlace_de_calendario() -> None:
     """
     Un evento que sale de una reunion se ofrece con un boton que abre Google
