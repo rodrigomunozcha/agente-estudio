@@ -37,8 +37,10 @@ launchctl kickstart -k gui/$(id -u)/local.agente-estudio.bot
 
 `airdrop` y `secretaria` arrancan de cero en cada corrida, así que ya leen el código nuevo sin reiniciar nada.
 
-Los registros quedan en `orquestador/logs/`: `bot.log`, `errores.log` y `uso.jsonl`, con
-el consumo de cada llamada. El campo `sesion` de `uso.jsonl` lleva a la conversación
+Los registros quedan en `orquestador/logs/`: `bot.log`, `errores.log`, `uso.jsonl`, con
+el consumo de cada llamada, y `opiniones.jsonl`, con cada 👍/👎 sobre una respuesta del bot
+(pregunta, respuesta, sesión, voto y el motivo si lo dio). Cada línea es completa: para
+analizar, vale la última de cada `mensaje`. El campo `sesion` de `uso.jsonl` lleva a la conversación
 completa, en `~/.claude/projects/<carpeta del proyecto>/<sesion>.jsonl`. La última
 actividad queda en `Estado.txt`.
 

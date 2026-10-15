@@ -62,6 +62,12 @@ from .uso import registrar_uso
 
 RUTA_INSTRUCCIONES = Path(__file__).parent / "plantilla_bot" / "instrucciones.md"
 RUTA_ESTADO = Path(__file__).parent / "bot_estado.json"
+# Las opiniones 👍/👎 sobre cada respuesta, para ver despues que respuestas salieron
+# malas y por que. Trae las preguntas del estudiante: vive en logs/, que git ignora.
+RUTA_OPINIONES = Path(__file__).parent / "logs" / "opiniones.jsonl"
+VOTOS = [("👍", "voto:+"), ("👎", "voto:-")]
+# Las ultimas respuestas que se pueden votar. Una mas vieja ya no tiene botones utiles.
+RESPUESTAS_VOTABLES = 20
 
 MEMORIA = timedelta(hours=3)
 # Sonnet 5.5 por pedido del estudiante (29-09-2026). Medido ese dia con el precio
@@ -91,6 +97,7 @@ AYUDA = (
     "📎 Mándame fotos o PDF. Los guardo en la carpeta Bot de IA del ramo, en OneDrive. Si "
     "escribes el ramo junto al archivo, no te pregunto.\n\n"
     "☀️ A las 9:00 te escribo si el profesor pidió algo para ese día o si viene una evaluación.\n\n"
+    "👍👎 Cada respuesta trae dos botones. Si una no te sirvió, toca 👎: así sé qué mejorar.\n\n"
     "🧠 Recuerdo la conversación mientras no pasen 3 horas sin escribir. Con /nuevaconversacion "
     "la borro antes.\n\n"
     "👇 Toca Menú para ver los comandos."
@@ -333,7 +340,7 @@ def conversar(texto: str, estado: dict, config: dict) -> None:
 
     estado.update(session_id=sesion, ultimo=ahora.isoformat())
     accion, respuesta = separar_accion(respuesta)
-    teclado, propuesta = None, None
+    propuesta = None
     if accion and accion.get("tipo") == "cancelar":
         # El estudiante corrigio al bot: la propuesta que esperaba un boton se retira.
         retirada = _retirar_propuesta(estado)
@@ -347,27 +354,91 @@ def conversar(texto: str, estado: dict, config: dict) -> None:
             _retirar_propuesta(estado)
             propuesta = {"tipo": "accion", "accion": evaluaciones.revisar_accion_del_chat(accion, datos)}
             respuesta = f"{respuesta}\n\n{confirmacion}".strip()
-            teclado = telegram.botones([("Sí, anótalo", "si"), ("No", "no")])
     # Se guarda antes de enviar: si Telegram falla, la conversacion y lo retirado
-    # no se pierden. La propuesta nueva se guarda despues, cuando su mensaje existe.
+    # no se pierden. La propuesta y la respuesta votable se guardan despues, cuando
+    # su mensaje existe.
     _guardar_estado(estado)
     telegram.editar(mid, f"✅ Listo ({segundos} s)")
-    enviado = telegram.enviar(respuesta, teclado=teclado)
+    confirmar = [("Sí, anótalo", "si"), ("No", "no")] if propuesta else []
+    enviado = telegram.enviar(respuesta, teclado=telegram.botones(confirmar + VOTOS))
+    mensaje = enviado.get("message_id")
     if propuesta:
         # El id del mensaje deja retirar sus botones y distinguirlos de los de otra propuesta.
-        estado["pendiente"] = dict(propuesta, mensaje=enviado.get("message_id"))
-        _guardar_estado(estado)
+        estado["pendiente"] = dict(propuesta, mensaje=mensaje)
+    estado["respuestas"] = (estado.get("respuestas") or [])[-(RESPUESTAS_VOTABLES - 1):] + [
+        {"mensaje": mensaje, "fecha": ahora.isoformat(timespec="seconds"), "pregunta": texto,
+         "respuesta": respuesta, "sesion": sesion}]
+    _guardar_estado(estado)
+
+
+def _respuesta(estado: dict, mensaje: int | None) -> dict | None:
+    return next((r for r in estado.get("respuestas") or [] if r.get("mensaje") == mensaje), None)
+
+
+def _teclado(mensaje: int, estado: dict) -> dict | None:
+    """Los botones que le quedan vigentes a una respuesta: Si/No mientras su
+    propuesta espere, y 👍/👎 hasta que se vote. Se rearma despues de cada toque."""
+    opciones = []
+    pendiente = estado.get("pendiente") or {}
+    if pendiente.get("tipo") == "accion" and pendiente.get("mensaje") == mensaje:
+        opciones += [("Sí, anótalo", "si"), ("No", "no")]
+    r = _respuesta(estado, mensaje)
+    if r is not None and "voto" not in r:
+        opciones += VOTOS
+    return telegram.botones(opciones) if opciones else None
 
 
 def _retirar_propuesta(estado: dict) -> bool:
-    """Saca del estado la accion que espera confirmacion y le quita los botones a su
+    """Saca del estado la accion que espera confirmacion y le quita el Si/No a su
     mensaje. False si no habia ninguna."""
     pendiente = estado.get("pendiente") or {}
     if pendiente.get("tipo") != "accion":
         return False
     estado.pop("pendiente")
     if pendiente.get("mensaje"):
-        telegram.quitar_botones(pendiente["mensaje"])
+        telegram.cambiar_botones(pendiente["mensaje"], _teclado(pendiente["mensaje"], estado))
+    return True
+
+
+def registrar_opinion(r: dict) -> None:
+    """Una linea por evento: el voto, y otra con el motivo si el estudiante lo da.
+    Cada linea es completa, asi que para analizar vale la ultima de cada mensaje."""
+    RUTA_OPINIONES.parent.mkdir(parents=True, exist_ok=True)
+    campos = ("fecha", "mensaje", "pregunta", "respuesta", "sesion", "voto", "motivo")
+    with open(RUTA_OPINIONES, "a", encoding="utf-8") as f:
+        f.write(json.dumps({k: r.get(k) for k in campos}, ensure_ascii=False) + "\n")
+
+
+def votar(mensaje: int | None, voto: str, estado: dict) -> None:
+    r = _respuesta(estado, mensaje)
+    if r is None or "voto" in r:
+        telegram.enviar("⌛ Ese botón ya no está vigente.")
+        return
+    r["voto"] = voto
+    registrar_opinion(r)
+    telegram.cambiar_botones(mensaje, _teclado(mensaje, estado))
+    if voto == "-":
+        # Respuesta forzada: si el estudiante contesta este mensaje, es el motivo. Si
+        # escribe otra cosa, es otra pregunta. Asi no hay que adivinar cual es cual.
+        pedido = telegram.enviar("🤔 ¿Qué faltó? Respóndeme este mensaje en una línea, si quieres. "
+                                 "Si no, sigue con lo tuyo.",
+                                 teclado={"force_reply": True, "input_field_placeholder": "Qué faltó (opcional)"})
+        estado["pidiendo_motivo"] = {"mensaje": pedido.get("message_id"), "respuesta": mensaje}
+    _guardar_estado(estado)
+
+
+def anotar_motivo(msg: dict, texto: str, estado: dict) -> bool:
+    """True si el mensaje contesta la pregunta de "¿Qué faltó?" y se anoto como motivo."""
+    pedido = estado.get("pidiendo_motivo") or {}
+    if not pedido or (msg.get("reply_to_message") or {}).get("message_id") != pedido.get("mensaje"):
+        return False
+    estado.pop("pidiendo_motivo")
+    r = _respuesta(estado, pedido.get("respuesta"))
+    if r is not None:
+        r["motivo"] = texto
+        registrar_opinion(r)
+    _guardar_estado(estado)
+    telegram.enviar("🙏 Gracias, lo anoté para mejorar.")
     return True
 
 
@@ -474,8 +545,12 @@ def atender_boton(cb: dict, estado: dict, config: dict) -> None:
     elif dato in ("si", "no") and pendiente.get("tipo") == "accion":
         estado.pop("pendiente")
         _guardar_estado(estado)
+        if mensaje:
+            telegram.cambiar_botones(mensaje, _teclado(mensaje, estado))
         telegram.enviar(aplicar_accion(pendiente["accion"]) if dato == "si"
                         else "👌 Listo, no anoté nada.")
+    elif dato in ("voto:+", "voto:-"):
+        votar(mensaje, dato[-1], estado)
     elif dato.startswith("ramo:") and pendiente.get("tipo") == "archivo":
         ramos = ramos_con_carpeta(config)
         i = int(dato[5:])
@@ -510,7 +585,7 @@ def atender(actualizacion: dict, chat: int) -> None:
         telegram.enviar("🤔 Por ahora entiendo texto, fotos y archivos.")
     elif texto.startswith("/"):
         atender_comando(texto[1:].split()[0].split("@")[0].lower(), estado, config)
-    else:
+    elif not anotar_motivo(msg, texto, estado):
         conversar(texto, estado, config)
 
 

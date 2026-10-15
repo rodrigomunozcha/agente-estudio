@@ -28,7 +28,8 @@ orquestador/config.json
 # Dependencias de Node (se reinstalan con npm install)
 node_modules/
 
-# Estado de ejecucion y logs, no es codigo (algunos contienen fragmentos reales de transcripciones)
+# Estado de ejecucion y logs, no es codigo (algunos contienen fragmentos reales de transcripciones,
+# y opiniones.jsonl trae las preguntas del estudiante al bot con su 👍/👎)
 orquestador/logs/
 orquestador/transcripciones_pendientes/
 orquestador/estado_tamanos.json

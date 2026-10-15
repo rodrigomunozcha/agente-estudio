@@ -2698,12 +2698,20 @@ def probar_bot_de_telegram() -> None:
         destino.write_bytes(b"foto")
         return destino
 
-    quitados = []
+    cambios = []  # (mensaje, botones con que queda) de cada cambiar_botones
     tg = b.telegram
     originales = (tg.enviar, tg.editar, tg.escribiendo, tg.responder_boton, tg.descargar,
-                  b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.quitar_botones)
+                  b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.cambiar_botones,
+                  b.RUTA_OPINIONES)
     tg.enviar, tg.editar = enviar, (lambda mid, texto, chat_id=None: editados.append(texto))
-    tg.quitar_botones = lambda mid, chat_id=None: quitados.append(mid)
+    tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
+    b.RUTA_OPINIONES = base / "opiniones.jsonl"
+
+    def datos_de(teclado):
+        return [x["callback_data"] for fila in (teclado or {}).get("inline_keyboard", []) for x in fila]
+
+    def confirma(teclado):
+        return "si" in datos_de(teclado)
     tg.escribiendo, tg.responder_boton, tg.descargar = (lambda *a: None), (lambda *a: None), descargar
     b._preguntar, b.RUTA_ESTADO = preguntar_falso, base / "bot_estado.json"
     ev.RUTA, od.COPIADOR, b.cargar_config = base / "evaluaciones.json", copiador, (lambda: config)
@@ -2745,7 +2753,7 @@ def probar_bot_de_telegram() -> None:
         b.atender(mensaje("falté a la clase del lunes"), 1)
         texto, teclado = enviados[-1]
         check("un aviso que cambia fechas pide confirmacion con botones, sin mostrar la linea ACCION",
-              "ACCION" not in texto and "¿Anoto que faltaste" in texto and teclado is not None, texto)
+              "ACCION" not in texto and "¿Anoto que faltaste" in texto and confirma(teclado), texto)
         b.atender(boton("si"), 1)
         check("y lo anota solo al confirmar",
               ev.cargar()["clases_perdidas"] == [{"ramo": ramo, "fecha": "2026-10-05"}]
@@ -2761,7 +2769,7 @@ def probar_bot_de_telegram() -> None:
 
         respuesta["texto"] = "Ok.\nACCION: {\"tipo\": \"clase_perdida\", \"ramo\": \"OTRO\", \"fecha\": \"2026-10-05\"}"
         b.atender(mensaje("falté a otro ramo"), 1)
-        check("una accion con un ramo que no existe no ofrece botones", enviados[-1][1] is None)
+        check("una accion con un ramo que no existe no ofrece botones", not confirma(enviados[-1][1]))
         check("el bot conoce el horario", "lunes: Ramo de Prueba, 08:30 a 10:00, sala A-101"
               in respuesta["prompt"], respuesta["prompt"][-600:])
 
@@ -2779,7 +2787,7 @@ def probar_bot_de_telegram() -> None:
                               + "\", \"fecha\": \"2036-10-13\", \"que\": \"Control 2\"}")
         b.atender(mensaje("el lunes 12 hay control 2"), 1)
         check("un control contado por el chat pide confirmacion",
-              "¿Anoto para el lunes 13 de octubre" in enviados[-1][0] and enviados[-1][1] is not None,
+              "¿Anoto para el lunes 13 de octubre" in enviados[-1][0] and confirma(enviados[-1][1]),
               enviados[-1][0])
         b.atender(boton("si"), 1)
         b.atender(mensaje("el lunes 12 hay control 2"), 1)
@@ -2813,7 +2821,7 @@ def probar_bot_de_telegram() -> None:
         b.atender(mensaje("se suspendió la clase de hoy"), 1)
         texto, teclado = enviados[-1]
         check("una clase suspendida se propone como suspendida, sin decir que faltaste, y sin relleno",
-              "se suspendió" in texto and "faltaste" not in texto and teclado is not None
+              "se suspendió" in texto and "faltaste" not in texto and confirma(teclado)
               and texto.startswith("📝"), texto)
         b.atender(boton_en("si", len(enviados)), 1)
         datos_ev = ev.cargar()
@@ -2833,8 +2841,8 @@ def probar_bot_de_telegram() -> None:
         respuesta["texto"] = 'ACCION: {"tipo": "cancelar"}'
         b.atender(mensaje("no, esa no era"), 1)
         check("cancelar retira la propuesta, le quita los botones y avisa que no anotó nada",
-              quitados[-1] == propuesta and "No anoté nada" in enviados[-1][0]
-              and "pendiente" not in json.loads(b.RUTA_ESTADO.read_text()), f"{quitados} {enviados[-1]}")
+              cambios[-1][0] == propuesta and not confirma(cambios[-1][1]) and "No anoté nada" in enviados[-1][0]
+              and "pendiente" not in json.loads(b.RUTA_ESTADO.read_text()), f"{cambios[-1:]} {enviados[-1]}")
         b.atender(boton_en("si", propuesta), 1)
         check("y tocar ese botón después no anota nada",
               "ya no está vigente" in enviados[-1][0]
@@ -2848,7 +2856,8 @@ def probar_bot_de_telegram() -> None:
         respuesta["texto"] = accion(tipo="pendiente", fecha="2036-11-09", que="Entrega 2")
         b.atender(mensaje("perdón, era el 9"), 1)
         segunda = len(enviados)
-        check("una propuesta nueva le quita los botones a la anterior", quitados[-1] == primera, str(quitados))
+        check("una propuesta nueva le quita el Sí/No a la anterior",
+              cambios[-1][0] == primera and not confirma(cambios[-1][1]), str(cambios[-1:]))
         b.atender(boton_en("si", primera), 1)
         check("y el botón de la anterior no confirma la nueva",
               "ya no está vigente" in enviados[-1][0]
@@ -2862,7 +2871,7 @@ def probar_bot_de_telegram() -> None:
         b.atender(mensaje("ya hice el control 2"), 1)
         texto, teclado = enviados[-1]
         check("marcar un pendiente como hecho pide confirmación, aunque no diga la fecha ni las mayúsculas",
-              "Control 2" in texto and "hecho" in texto and teclado is not None, texto)
+              "Control 2" in texto and "hecho" in texto and confirma(teclado), texto)
         b.atender(boton_en("si", len(enviados)), 1)
         dia = _date(2036, 10, 13)
         check("y deja de salir en /pendientes, pero los otros siguen",
@@ -2874,13 +2883,60 @@ def probar_bot_de_telegram() -> None:
               [x["estado"] for x in ev.cargar()["pendientes"] if x["que"] == "Control 2"] == ["hecho"])
         respuesta["texto"] = accion(tipo="hecho", que="Control 2")
         b.atender(mensaje("ya hice el control 2"), 1)
-        check("uno que ya está hecho no se vuelve a ofrecer", enviados[-1][1] is None)
+        check("uno que ya está hecho no se vuelve a ofrecer", not confirma(enviados[-1][1]))
         respuesta["texto"] = accion(tipo="hecho", que="Algo que nunca anoté")
         b.atender(mensaje("ya hice algo"), 1)
-        check("ni uno que no existe", enviados[-1][1] is None)
+        check("ni uno que no existe", not confirma(enviados[-1][1]))
         respuesta["texto"] = accion(tipo="hecho", que="Mandar el CV").replace(ramo, "REUNIÓN")
         b.atender(mensaje("ya mandé el CV"), 1)
-        check("el pendiente de una reunión también se marca", enviados[-1][1] is not None, enviados[-1][0])
+        check("el pendiente de una reunión también se marca", confirma(enviados[-1][1]), enviados[-1][0])
+
+        # --- 👍/👎 en cada respuesta ---
+        def opiniones():
+            ruta = b.RUTA_OPINIONES
+            return [json.loads(x) for x in ruta.read_text().splitlines()] if ruta.exists() else []
+
+        respuesta["texto"] = "La elasticidad mide la sensibilidad... (clase 28-09)"
+        b.atender(mensaje("¿qué es la elasticidad?"), 1)
+        votada = len(enviados)
+        check("cada respuesta lleva 👍 y 👎, sin Sí/No si no propone nada",
+              datos_de(enviados[-1][1]) == ["voto:+", "voto:-"], str(enviados[-1][1]))
+        b.atender(boton_en("voto:-", votada), 1)
+        texto, teclado = enviados[-1]
+        check("👎 pregunta en una línea qué faltó, como respuesta opcional",
+              "¿Qué faltó?" in texto and (teclado or {}).get("force_reply") is True, texto)
+        check("y le quita los votos a esa respuesta", cambios[-1] == (votada, None), str(cambios[-1:]))
+        reg = opiniones()
+        check("el 👎 queda registrado con la pregunta, la respuesta y la sesión",
+              len(reg) == 1 and reg[0]["voto"] == "-" and reg[0]["pregunta"] == "¿qué es la elasticidad?"
+              and reg[0]["respuesta"].startswith("La elasticidad") and reg[0]["sesion"] == "sesion-1", str(reg))
+        llamadas = len(sesiones)
+        b.atender(mensaje("le faltó un ejemplo numérico", reply_to_message={"message_id": len(enviados)}), 1)
+        reg = opiniones()
+        check("contestar esa pregunta deja el motivo, sin llamar al modelo",
+              reg[-1]["motivo"] == "le faltó un ejemplo numérico" and reg[-1]["voto"] == "-"
+              and len(sesiones) == llamadas and "Gracias" in enviados[-1][0], str(reg[-1:]))
+        b.atender(boton_en("voto:+", votada), 1)
+        check("una respuesta ya votada no se vota de nuevo",
+              "ya no está vigente" in enviados[-1][0] and len(opiniones()) == 2)
+
+        b.atender(mensaje("¿y la elasticidad cruzada?"), 1)
+        b.atender(boton_en("voto:-", len(enviados)), 1)
+        b.atender(mensaje("otra pregunta, sin contestar el qué faltó"), 1)
+        check("ignorar el qué faltó deja seguir conversando",
+              len(sesiones) == llamadas + 2 and opiniones()[-1]["motivo"] is None)
+        b.atender(boton_en("voto:+", len(enviados)), 1)
+        check("👍 queda registrado sin preguntar nada",
+              opiniones()[-1]["voto"] == "+" and "Qué faltó" not in enviados[-1][0])
+
+        respuesta["texto"] = accion(tipo="pendiente", fecha="2036-12-01", que="Entrega 3")
+        b.atender(mensaje("hay una entrega el 1"), 1)
+        propuesta = len(enviados)
+        check("una propuesta lleva Sí/No y además los votos",
+              datos_de(enviados[-1][1]) == ["si", "no", "voto:+", "voto:-"], str(enviados[-1][1]))
+        b.atender(boton_en("si", propuesta), 1)
+        check("al confirmar se va el Sí/No y quedan los votos",
+              cambios[-1][0] == propuesta and datos_de(cambios[-1][1]) == ["voto:+", "voto:-"], str(cambios[-1:]))
 
         foto = {"photo": [{"file_id": "chica"}, {"file_id": "grande", "file_size": 1000}]}
         b.atender(mensaje(**foto), 1)
@@ -2907,7 +2963,8 @@ def probar_bot_de_telegram() -> None:
         check("a cualquier otro chat no le contesta", len(enviados) == antes)
     finally:
         (tg.enviar, tg.editar, tg.escribiendo, tg.responder_boton, tg.descargar,
-         b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.quitar_botones) = originales
+         b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.cambiar_botones,
+         b.RUTA_OPINIONES) = originales
         shutil.rmtree(base, ignore_errors=True)
 
 
