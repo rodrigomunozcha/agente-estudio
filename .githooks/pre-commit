@@ -32,8 +32,14 @@ fi
 # Las pruebas corren antes que todo: tardan menos de dos segundos y sin repositorio
 # remoto no hay CI que las corra despues. Se sumaron el 05-10-2026, cuando se vio
 # que la copia "Agente estudio" llevaba mas de diez commits sin este hook activo.
+#
+# Las pruebas corren sin las variables GIT_* que git exporta dentro de un hook. El
+# 15-10-2026, en un worktree, una prueba hizo git init en una carpeta temporal,
+# heredo GIT_DIR y reinicializo el repo real, que quedo marcado como bare: ninguna
+# carpeta de trabajo volvio a funcionar hasta corregirlo a mano. Se arreglo esa
+# prueba, y esto cubre a la siguiente que llame a git.
 raiz=$(git rev-parse --show-toplevel)
-if [ -f "$raiz/tests/test_orquestador.py" ] && ! salida=$(cd "$raiz" && /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 tests/test_orquestador.py 2>&1); then
+if [ -f "$raiz/tests/test_orquestador.py" ] && ! salida=$(cd "$raiz" && unset $(env | grep -o '^GIT_[A-Z_]*') && /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 tests/test_orquestador.py 2>&1); then
     echo ""
     echo "Commit detenido: fallan las pruebas."
     echo "$salida" | grep -E "FALLA|FALLARON|Error|Traceback" | head -20
