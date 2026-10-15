@@ -605,6 +605,8 @@ def atender_boton(cb: dict, estado: dict, config: dict) -> None:
         votar(mensaje, dato[-1], estado)
     elif dato.startswith("seg:"):
         responder_seguimiento(dato, mensaje)
+    elif dato.startswith("mem:"):
+        responder_memoria(dato, mensaje, config)
     elif dato.startswith("ramo:") and pendiente.get("tipo") == "archivo":
         ramos = ramos_con_carpeta(config)
         i = int(dato[5:])
@@ -641,6 +643,19 @@ def responder_seguimiento(dato: str, mensaje: int | None) -> None:
         telegram.enviar(f"📆 Lo pospongo: te vuelvo a preguntar el {secretaria._fecha(p['fecha'])}.")
     else:
         telegram.enviar("🗑️ Descartado. No te lo vuelvo a preguntar.")
+
+
+def responder_memoria(dato: str, mensaje: int | None, config: dict) -> None:
+    """Los botones de "¿Guardo esto de la reunión en tu memoria?" (reuniones.ofrecer_memoria)."""
+    _, respuesta, clave = (dato.split(":") + ["", ""])[:3]
+    recuerdo = reuniones.tomar_propuesta(clave)
+    if recuerdo is None:
+        telegram.enviar("⌛ Esa propuesta ya no está vigente.")
+        return
+    if mensaje:
+        telegram.cambiar_botones(mensaje, None)
+    telegram.enviar(aplicar_accion({"tipo": "memoria", "recuerdo": recuerdo}, config) if respuesta == "si"
+                    else "👌 Listo, no guardé nada.")
 
 
 def atender(actualizacion: dict, chat: int) -> None:

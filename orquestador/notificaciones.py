@@ -185,6 +185,13 @@ def notificar_evento(que: str, cuando: str, url: str, lugar: str = "") -> None:
                     teclado=telegram.boton_enlace("Agregar a Google Calendar", url))
 
 
+def notificar_memoria(recuerdo: dict, clave: str) -> None:
+    """Ofrece guardar en la wiki lo que salio de una reunion. Solo por Telegram: el boton
+    lo atiende el bot (bot.responder_memoria), y en el Mac no hay donde tocarlo."""
+    telegram.avisar(f"🧠 ¿Guardo esto de la reunión en tu memoria?\n📄 {recuerdo['pagina']}\n• {recuerdo['texto']}",
+                    teclado=telegram.botones([("Sí, guárdalo", f"mem:si:{clave}"), ("No", f"mem:no:{clave}")]))
+
+
 def notificar_aviso(titulo: str, mensaje: str) -> None:
     """Para avisos que no son error ni exito completo (ej. la revision no corrio)."""
     _notificar(titulo=titulo, subtitulo="", mensaje=mensaje)

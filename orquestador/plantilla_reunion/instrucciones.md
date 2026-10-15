@@ -63,6 +63,13 @@ exactamente `===REUNION_FIN===`. Nada antes ni después. Con esta forma:
     }
   ],
   "preguntas_abiertas": ["Lo que quedó sin resolver"],
+  "memoria": [
+    {
+      "pagina": "El nombre de la empresa o institución",
+      "tipo_pagina": "entidad",
+      "texto": "Quién es y qué se habló con ella, en una o dos frases, para tenerlo a mano la próxima vez"
+    }
+  ],
   "entrevista": null,
   "investigar": [
     {
@@ -100,6 +107,19 @@ prometió la otra parte con un plazo: "te respondemos en una semana", "el lunes 
 contrato". El estudiante no lo hace, pero tiene que saber si se cumplió, y el sistema le
 pregunta el día que vence. Una promesa sin plazo no es un seguimiento: va en
 preguntas_abiertas. Si no hubo promesas con plazo, la lista va vacía.
+
+## Lo que vale guardar en su memoria
+
+En `memoria` va lo que el estudiante querría tener a mano la próxima vez que trate con esa
+organización: quién es y qué se habló, en una o dos frases. Una entrada por empresa o
+institución, solo si la conversación fue con una. Se le ofrece con un botón y solo se
+guarda si dice que sí.
+
+- A las personas, por su rol: "la entrevistadora de selección", "el gerente del área". Nunca
+  su nombre completo aquí, aunque se haya dicho: este texto va a su wiki, que no admite
+  nombres de personas privadas. El nombre queda en la nota de la reunión, que sí lo admite.
+- Nunca correos, teléfonos, RUT, direcciones ni datos bancarios.
+- Una reunión de grupo de estudio no tiene organización: la lista va vacía.
 
 ## Lo que hay que investigar
 

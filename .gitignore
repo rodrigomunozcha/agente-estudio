@@ -42,6 +42,9 @@ orquestador/evaluaciones.json
 orquestador/evaluaciones.lock
 # La conversacion vigente del bot de Telegram y lo que espera un boton.
 orquestador/bot_estado.json
+# Lo que se ofrecio guardar en la wiki despues de una reunion (reuniones.ofrecer_memoria):
+# trae lo que se hablo con una organizacion.
+orquestador/propuestas_memoria/
 Estado.txt
 
 # Configuracion local de Claude Code (permisos y rutas propias de este Mac)

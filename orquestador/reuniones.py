@@ -18,7 +18,9 @@ Que deja:
     seguimientos, con el .docx adjunto,
   - las acciones con fecha, anotadas para que la secretaria las recuerde a las 9:00,
   - los seguimientos: lo que la otra parte prometio con plazo ("te respondemos en una
-    semana"), anotados como pendientes de tipo seguimiento para el dia que vencen.
+    semana"), anotados como pendientes de tipo seguimiento para el dia que vencen,
+  - la oferta de guardar en la wiki (memoria.py) quien era la organizacion y que se
+    hablo, con un boton. Sin confirmacion no se guarda nada.
 
 Solo se afirma lo que tiene cita en la transcripcion, y eso lo comprueba Python
 (evaluaciones.cita_respaldada), no el modelo: una accion o una promesa inventada hace
@@ -38,7 +40,9 @@ A mano, sobre una transcripcion ya hecha (por ejemplo, una que quedo en
 Output/Sin clasificar):
     python3 -m orquestador.reuniones <transcripcion.txt> <AAAA-MM-DD> "<nombre>"
 """
+import hashlib
 import json
+import os
 import re
 import urllib.parse
 from datetime import date, datetime, timedelta
@@ -46,13 +50,13 @@ from pathlib import Path
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock
 
-from . import evaluaciones
+from . import evaluaciones, memoria
 from .archivado import archivar_audio
 from .config import cargar_config, dir_pendientes
 from .ensayo import es_ensayo
 from .hoja_html import HERRAMIENTAS_PROHIBIDAS
 from .nombres import nombre_base, sanitizar_nombre_archivo
-from .notificaciones import notificar_evento, notificar_reunion
+from .notificaciones import notificar_evento, notificar_memoria, notificar_reunion
 from .skill_runner import CLI_PATH, PROJECT_ROOT, consultar, describir_error_sdk
 from .uso import registrar_uso
 
@@ -70,6 +74,13 @@ MODELO = "claude-opus-5-5"
 MAX_PLAZO_DIAS = 180
 TIMEOUT_SEGUNDOS = 20 * 60
 PROHIBIDAS = [h for h in HERRAMIENTAS_PROHIBIDAS if h != "WebSearch"]
+
+# Lo que se ofrece guardar en la wiki, un archivo por oferta, hasta que el estudiante
+# toque un boton. No cabe en el dato del boton (64 bytes), y el boton lo atiende el bot,
+# que es otro proceso: el pipeline escribe el archivo una vez, el bot lo marca como
+# respondido, y nunca escriben a la vez. Trae lo que se hablo: .gitignore lo excluye.
+CARPETA_PROPUESTAS = Path(__file__).parent / "propuestas_memoria"
+_CLAVE = re.compile(r"[0-9a-f]{10}")
 
 _ENCABEZADO_SIN_CLASIFICAR = re.compile(r"\A.*?\n-{20,}\n\n", re.S)
 
@@ -313,6 +324,50 @@ def resumen_telegram(datos: dict, anotadas: int) -> str:
     return "\n\n".join(bloques)
 
 
+def ofrecer_memoria(datos: dict, nota: Path) -> int:
+    """Ofrece por Telegram cada recuerdo que propuso el analisis, con la nota de la
+    reunion como fuente. Solo los que memoria.revisar acepta: uno con un dato sensible no
+    se ofrece. Devuelve cuantos se ofrecieron."""
+    n = 0
+    for i, m in enumerate(datos.get("memoria") or []):
+        if not isinstance(m, dict):
+            continue
+        try:
+            r = memoria.revisar({"pagina": m.get("pagina"), "tipo": m.get("tipo_pagina"),
+                                 "texto": m.get("texto"), "fuente": nota.stem})
+        except memoria.RecuerdoInvalido:
+            continue
+        clave = hashlib.sha1(f"{nota.stem}|{i}".encode()).hexdigest()[:10]
+        CARPETA_PROPUESTAS.mkdir(parents=True, exist_ok=True)
+        _escribir_propuesta(CARPETA_PROPUESTAS / f"{clave}.json", {"recuerdo": r})
+        notificar_memoria(r, clave)
+        n += 1
+    return n
+
+
+def _escribir_propuesta(ruta: Path, datos: dict) -> None:
+    temporal = ruta.with_suffix(".tmp")
+    temporal.write_text(json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporal, ruta)
+
+
+def tomar_propuesta(clave: str) -> dict | None:
+    """El recuerdo ofrecido con esa clave, y la deja marcada como respondida: un segundo
+    toque, o el boton de una oferta vieja, ya no hace nada. None si no hay una vigente.
+    No se borra el archivo: queda como registro de lo que se ofrecio."""
+    if not _CLAVE.fullmatch(clave or ""):
+        return None
+    ruta = CARPETA_PROPUESTAS / f"{clave}.json"
+    try:
+        datos = json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if datos.get("respondida"):
+        return None
+    _escribir_propuesta(ruta, dict(datos, respondida=True))
+    return datos.get("recuerdo")
+
+
 def guardar(datos: dict, fecha: str, nombre: str, config: dict, transcripcion: str) -> tuple[Path, Path]:
     """Escribe la nota y el .docx, anota las acciones y los seguimientos, y avisa.
     Devuelve (nota, docx). La transcripcion es para comprobar cada cita aqui, justo
@@ -337,6 +392,7 @@ def guardar(datos: dict, fecha: str, nombre: str, config: dict, transcripcion: s
                 cuando = a["fecha"] + (f", {a['hora']}" if a.get("hora") else "")
                 notificar_evento(a["que"], cuando, url,
                                  a["lugar"] if a.get("presencial") is True and a.get("lugar") else "")
+        ofrecer_memoria(datos, nota)
     return nota, docx
 
 

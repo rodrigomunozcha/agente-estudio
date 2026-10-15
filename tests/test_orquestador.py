@@ -3306,6 +3306,83 @@ def probar_memoria_en_la_wiki() -> None:
         shutil.rmtree(boveda, ignore_errors=True)
 
 
+def probar_reunion_ofrece_memoria() -> None:
+    """
+    Al cerrar una reunion, se ofrece guardar en la wiki quien era la organizacion y que
+    se hablo, con la nota de la reunion como fuente. Lo guarda el bot solo si el
+    estudiante toca Si. Un recuerdo con un dato sensible ni se ofrece. Boveda, OneDrive,
+    Telegram y archivo de fechas son falsos.
+    """
+    print("\n== una reunion ofrece guardar en la memoria ==")
+    from orquestador import bot as b
+    from orquestador import evaluaciones as ev
+    from orquestador import reuniones as re_
+
+    base = Path(tempfile.mkdtemp(prefix="reunion_memoria_"))
+    wiki = base / "vault" / "Wiki"
+    wiki.mkdir(parents=True)
+    (wiki / "Índice - Wiki.md").write_text("# Índice - Wiki\n\n## Personas y organizaciones\n", encoding="utf-8")
+    (wiki / "Registro - Wiki.md").write_text("# Registro - Wiki\n", encoding="utf-8")
+    config = {"rutas": {"vault_obsidian": str(base / "vault"), "output": str(base / "Output")}}
+    ofertas, enviados, cambios = [], [], []
+    tg = b.telegram
+    originales = (re_.CARPETA_DOCX, re_.CARPETA_PROPUESTAS, re_.notificar_reunion, re_.notificar_memoria,
+                  ev.RUTA, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.RUTA_ESTADO, b.cargar_config)
+    re_.CARPETA_DOCX, re_.CARPETA_PROPUESTAS = base / "OneDrive", base / "propuestas"
+    re_.notificar_reunion = lambda *a: None
+    re_.notificar_memoria = lambda r, clave: ofertas.append((r, clave))
+    ev.RUTA, b.RUTA_ESTADO, b.cargar_config = base / "evaluaciones.json", base / "estado.json", (lambda: config)
+    tg.enviar = lambda texto, chat_id=None, teclado=None: enviados.append(texto) or {"message_id": len(enviados)}
+    tg.responder_boton = lambda *a: None
+    tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
+    ev.guardar({"ramos": {}, "pendientes": []})
+
+    def tocar(dato):
+        b.atender({"callback_query": {"id": "x", "data": dato, "message": {"chat": {"id": 1}, "message_id": 7}}}, 1)
+
+    try:
+        datos = {"titulo": "Entrevista de práctica", "resumen": "r", "decisiones": [], "acciones": [],
+                 "preguntas_abiertas": [], "investigar": [], "entrevista": None,
+                 "memoria": [
+                     {"pagina": "Empresa Ejemplo", "tipo_pagina": "entidad",
+                      "texto": "Caja de compensación. La entrevistadora de selección explicó que la práctica es en el área de datos"},
+                     {"pagina": "Empresa Ejemplo", "tipo_pagina": "entidad",
+                      "texto": "El contacto es alguien@example.com"}]}
+        nota, _ = re_.guardar(datos, "2036-10-01", "Entrevista.m4a", config, "transcripción")
+        check("ofrece guardar la organización, con la nota de la reunión como fuente",
+              len(ofertas) == 1 and ofertas[0][0]["pagina"] == "Empresa Ejemplo"
+              and ofertas[0][0]["fuente"] == nota.stem, str(ofertas))
+        check("y el recuerdo con un dato sensible ni se ofrece",
+              not any("example.com" in r["texto"] for r, _ in ofertas))
+        check("sin tocar el botón no se guarda nada", not (wiki / "Personas y organizaciones").exists())
+        clave = ofertas[0][1]
+        tocar(f"mem:si:{clave}")
+        pagina = wiki / "Personas y organizaciones" / "Empresa Ejemplo.md"
+        check("con Sí queda en la wiki, citando la nota de la reunión",
+              pagina.is_file() and f"[[{nota.stem}]]" in pagina.read_text(encoding="utf-8")
+              and "Guardado en tu memoria" in enviados[-1] and cambios[-1] == (7, None), str(enviados[-1:]))
+        tocar(f"mem:si:{clave}")
+        check("tocarlo de nuevo no lo guarda dos veces",
+              "ya no está vigente" in enviados[-1]
+              and pagina.read_text(encoding="utf-8").count("área de datos") == 2)  # resumen y viñeta
+        tocar("mem:si:../../etc")
+        check("una clave que no es de una propuesta no lee nada", "ya no está vigente" in enviados[-1])
+
+        ofertas.clear()
+        re_.guardar(dict(datos, titulo="Otra entrevista"), "2036-10-02", "Otra.m4a", config, "transcripción")
+        tocar(f"mem:no:{ofertas[0][1]}")
+        check("con No no se guarda nada",
+              "no guardé nada" in enviados[-1] and "[[Reunión - 2036-10-02" not in pagina.read_text(encoding="utf-8"))
+        ofertas.clear()
+        re_.guardar(dict(datos, titulo="En ensayo"), "2036-10-03", "x.m4a", dict(config, **{ensayo.CLAVE: True}),
+                    "transcripción")
+        check("en un ensayo no se ofrece nada", ofertas == [])
+    finally:
+        (re_.CARPETA_DOCX, re_.CARPETA_PROPUESTAS, re_.notificar_reunion, re_.notificar_memoria,
+         ev.RUTA, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.RUTA_ESTADO, b.cargar_config) = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def probar_enlace_de_calendario() -> None:
     """
     Un evento que sale de una reunion se ofrece con un boton que abre Google
