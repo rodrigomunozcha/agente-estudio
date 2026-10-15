@@ -105,14 +105,23 @@ def publicar_en_onedrive(archivados: list[Path], ruta_hoja: Path, ramo: str, con
     carpeta = carpeta_del_ramo(ramo, config)
     if carpeta is None or not carpeta.is_dir():
         return None
-    clases = carpeta / CLASES
+    return reunir_en(carpeta / CLASES, archivados, [ruta_hoja], bitacora)
+
+
+def reunir_en(carpeta: Path, archivados: list[Path], copias: list[Path], bitacora=None) -> Path | None:
+    """
+    Junta en una carpeta lo que archivar_audio dejo en Procesados (el audio se mueve,
+    el .txt se copia) y las copias que se pidan (la hoja). La usan las clases y las
+    reuniones. Nunca pisa, y cada cambio queda en la bitacora. None si algo fallo:
+    lo que falte sigue en la sala de trabajo.
+    """
     try:
-        if not clases.is_dir():
-            clases.mkdir()
+        if not carpeta.is_dir():
+            carpeta.mkdir(parents=True)
             if bitacora is not None:
-                bitacora.carpeta_creada(clases)
+                bitacora.carpeta_creada(carpeta)
         for origen in archivados:
-            destino = _libre(clases / origen.name)
+            destino = _libre(carpeta / origen.name)
             if origen.suffix.lower() == ".txt":
                 shutil.copy2(origen, destino)
                 if bitacora is not None:
@@ -121,11 +130,12 @@ def publicar_en_onedrive(archivados: list[Path], ruta_hoja: Path, ramo: str, con
                 if bitacora is not None:
                     bitacora.audio_movido(origen, destino)  # antes de mover, como archivar_audio
                 shutil.move(str(origen), str(destino))
-        if ruta_hoja.is_file():
-            destino = _libre(clases / ruta_hoja.name)
-            shutil.copy2(ruta_hoja, destino)
-            if bitacora is not None:
-                bitacora.archivo_creado(destino)
+        for copia in copias:
+            if copia.is_file():
+                destino = _libre(carpeta / copia.name)
+                shutil.copy2(copia, destino)
+                if bitacora is not None:
+                    bitacora.archivo_creado(destino)
     except OSError:
         return None
-    return clases
+    return carpeta

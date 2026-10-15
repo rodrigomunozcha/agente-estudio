@@ -13,7 +13,8 @@ elige un ramo. finalizar_clase manda aqui en vez de a la skill de clases.
 
 Que deja:
   - una nota en la boveda, en Reuniones/,
-  - un .docx en "2 Areas/Reuniones post Claude/" de OneDrive,
+  - un .docx en "2 Areas/Reuniones post Claude/" de OneDrive, con el audio comprimido y
+    la transcripcion al lado y con el mismo nombre (archivado.reunir_en),
   - un resumen por Telegram: una linea de que fue, las acciones con su fecha y los
     seguimientos, con el .docx adjunto,
   - las acciones con fecha, anotadas para que la secretaria las recuerde a las 9:00,
@@ -51,12 +52,12 @@ from pathlib import Path
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock
 
 from . import evaluaciones, memoria
-from .archivado import archivar_audio
+from .archivado import archivar_audio, reunir_en
 from .config import cargar_config, dir_pendientes
 from .ensayo import es_ensayo
 from .hoja_html import HERRAMIENTAS_PROHIBIDAS
 from .nombres import nombre_base, sanitizar_nombre_archivo
-from .notificaciones import notificar_evento, notificar_memoria, notificar_reunion
+from .notificaciones import notificar_aviso, notificar_evento, notificar_memoria, notificar_reunion
 from .skill_runner import CLI_PATH, PROJECT_ROOT, consultar, describir_error_sdk
 from .uso import registrar_uso
 
@@ -414,7 +415,12 @@ async def procesar_reunion(trabajo_metadata: dict, config: dict, bitacora=None) 
     if bitacora is not None:
         bitacora.archivo_creado(nota)
     trabajo = dict(trabajo_metadata, archivos=trabajo_metadata["archivos_originales"])
-    archivar_audio(trabajo, datos["titulo"], config, bitacora)
+    archivados = archivar_audio(trabajo, datos["titulo"], config, bitacora)
+    # La reunion en un solo lugar: el audio y la transcripcion junto a su .docx, con el
+    # mismo nombre (issue #1). En un ensayo el .docx queda en el sandbox y esto no aplica.
+    if not es_ensayo(config) and reunir_en(docx.parent, archivados, [], bitacora) is None:
+        notificar_aviso("La reunión no quedó entera junto a su .docx",
+                        f"{datos['titulo']}: lo que falte sigue en Procesados.")
     return docx
 
 

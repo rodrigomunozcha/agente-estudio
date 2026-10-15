@@ -1782,6 +1782,54 @@ def probar_reunion_audio_txt_y_docx_con_el_mismo_nombre() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_reunion_en_un_solo_lugar() -> None:
+    """
+    Fuera de un ensayo, una reunion deja la grabacion, la transcripcion y el .docx
+    juntos en la carpeta de reuniones, con el mismo nombre. La grabacion se mueve y la
+    transcripcion se copia. Carpetas temporales y el analisis guardado de antemano.
+    """
+    print("\n== cada reunion en un solo lugar ==")
+    import asyncio
+    import json
+
+    from orquestador import reuniones as rn
+
+    base = Path(tempfile.mkdtemp(prefix="reunion_lugar_"))
+    pendientes = base / "pendientes"
+    pendientes.mkdir()
+    audio = base / "Input" / "grabacion.m4a"
+    audio.parent.mkdir()
+    audio.write_bytes(b"a")
+    texto = pendientes / "s1.txt"
+    texto.write_text("lo que se dijo", encoding="utf-8")
+    (pendientes / "s1_reunion.json").write_text(json.dumps({
+        "titulo": "Café con un profe", "tipo": "conversacion", "calidad_audio": "buena",
+        "resumen": "Hablamos.", "decisiones": [], "acciones": [], "preguntas_abiertas": [],
+        "entrevista": None, "investigar": []}, ensure_ascii=False), encoding="utf-8")
+    config = {"rutas": {"output": str(base / "Output"), "procesados": str(base / "Procesados"),
+                        "vault_obsidian": str(base / "vault")}}
+    originales = (rn.notificar_reunion, rn.CARPETA_DOCX, rn.evaluaciones.RUTA)
+    rn.notificar_reunion = lambda *a, **k: None
+    rn.CARPETA_DOCX, rn.evaluaciones.RUTA = base / "Reuniones post Claude", base / "evaluaciones.json"
+    rn.evaluaciones.guardar({"ramos": {}, "pendientes": []})
+    usar_dir_pendientes(pendientes)
+    try:
+        docx = asyncio.run(rn.procesar_reunion(
+            {"slug": "s1", "fecha": "2026-10-07", "ramo": rn.RAMO,
+             "archivos_originales": [str(audio)], "archivo_texto": str(texto)}, config))
+        esperado = "07.10.26 - Café con un profe - Reunión"
+        juntos = sorted(p.name for p in docx.parent.iterdir())
+        check("grabación, transcripción y .docx quedan juntos, con el mismo nombre",
+              juntos == [f"{esperado}.docx", f"{esperado}.m4a", f"{esperado}.txt"], str(juntos))
+        sala = sorted(p.name for p in (base / "Procesados" / rn.RAMO).iterdir())
+        check("la grabación no queda dos veces: en la sala de trabajo solo la transcripción",
+              sala == [f"{esperado}.txt"], str(sala))
+    finally:
+        rn.notificar_reunion, rn.CARPETA_DOCX, rn.evaluaciones.RUTA = originales
+        usar_dir_pendientes(None)
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def probar_renumerar_corrige_la_hoja() -> None:
     """
     En los ramos con numeracion por orden, una clase mas antigua que llega tarde
