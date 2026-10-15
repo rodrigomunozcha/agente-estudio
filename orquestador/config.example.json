@@ -49,6 +49,9 @@
   },
   "ramos_adicionales": {},
   "carpetas_ramo": {},
+  "carpetas_onedrive": {
+    "NOMBRE DEL RAMO DEL LUNES": "/Users/tu_usuario/Library/CloudStorage/OneDrive-Personal/ruta/a/la/carpeta/del/ramo"
+  },
   "programas": {
     "NOMBRE DEL RAMO DEL LUNES": "Programa del ramo.pdf"
   },

@@ -71,8 +71,11 @@ El camino de una clase:
    intermedio permite reintentar sin volver a transcribir.
 4. `finalizar_clase` encadena el resto: `skill_runner` (la skill escribe las notas en el
    vault de Obsidian), `revisor` en sesión aparte, la corrección, los anuncios y pedidos del
-   profesor hacia `evaluaciones.json`, `hoja_html`, el `archivado` del audio, la copia a
-   OneDrive y `hoja_evaluacion`. Una clase con `<slug>_skill.json` ya está escrita.
+   profesor hacia `evaluaciones.json`, `hoja_html`, el `archivado` del audio y su
+   publicación en `<carpeta del ramo>/Clases/` de OneDrive (audio comprimido movido,
+   transcripción y hoja copiadas, con el mismo nombre), y `hoja_evaluacion`. La carpeta de
+   cada ramo la declara `carpetas_onedrive` en `config.json`. `Procesados/` y `Output/`
+   quedan como sala de trabajo. Una clase con `<slug>_skill.json` ya está escrita.
 5. `notificaciones` avisa en el Mac y repite en Telegram solo los avisos finales.
 
 Una grabación con ramo `REUNIÓN` se desvía a `reuniones.py`. Deja una nota en `Reuniones/`
@@ -102,8 +105,8 @@ Piezas del agente que viven fuera de este repo, con su propio respaldo:
 - `backend/transcriber.py` de Transcriptotem, en OneDrive (ruta en `config.json`). Sin git:
   git dentro de OneDrive se corrompe al sincronizar. Antes de cambiarlo, copia el archivo a
   `_herramientas/respaldos/` del contenedor.
-- En `_herramientas/` del contenedor, que tiene git local sin remote: el copiador de hojas a
-  OneDrive, el hook compartido de privacidad (`git-hooks/`), la auditoría de publicación
+- En `_herramientas/` del contenedor, que tiene git local sin remote: el hook compartido de
+  privacidad (`git-hooks/`), la auditoría de publicación
   y la carga de la lista privada del Llavero.
 
 Piezas que cruzan todo el sistema:

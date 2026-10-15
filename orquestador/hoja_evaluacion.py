@@ -181,7 +181,7 @@ async def generar(ramo: str, nombre: str, config: dict, datos: dict | None = Non
     tipo = ev.get("tipo") if ev.get("tipo") in ("prueba", "trabajo") else "prueba"
     try:
         material = onedrive.leer_material(ramo, nombre, tipo,
-                                          (config.get("programas") or {}).get(ramo))
+                                          (config.get("programas") or {}).get(ramo), config)
     except Exception:
         material = []  # sin OneDrive la hoja se arma igual, solo con las clases
     perdidas = [p for p in datos.get("clases_perdidas", [])
@@ -233,7 +233,7 @@ async def generar(ramo: str, nombre: str, config: dict, datos: dict | None = Non
 
     en_onedrive = False
     if not es_ensayo(config):
-        en_onedrive = onedrive.copiar_pisando(ruta, ramo) is not None
+        en_onedrive = onedrive.copiar_pisando(ruta, ramo, config) is not None
         if not en_onedrive:
             notificar_aviso(f"La hoja de la {nombre_largo} no llegó a OneDrive",
                             f"{ramo_legible(ramo)}: quedó en Output, pero no en tu carpeta del semestre.")

@@ -127,7 +127,7 @@ def ramos_con_carpeta(config: dict) -> list[str]:
     """Los ramos que tienen carpeta en OneDrive, en el orden de la semana."""
     nombres = [info["nombre"] for info in (config.get("ramos") or {}).values()]
     nombres += [r for r in (config.get("ramos_adicionales") or {}) if r not in nombres]
-    return [r for r in nombres if onedrive.carpeta_del_ramo(r) is not None]
+    return [r for r in nombres if onedrive.carpeta_del_ramo(r, config) is not None]
 
 
 # --------------------------------------------------------------------------
@@ -145,7 +145,7 @@ def _raices_de_lectura(config: dict) -> list[Path]:
                Path(config["rutas"]["vault_obsidian"]) / reuniones.CARPETA_BOVEDA,
                Path(config["rutas"]["vault_obsidian"]) / memoria.CARPETA_WIKI]
     for ramo in ramos_con_carpeta(config):
-        carpeta = onedrive.carpeta_del_ramo(ramo)
+        carpeta = onedrive.carpeta_del_ramo(ramo, config)
         raices.append(carpeta / "Bot de IA")
         # El programa del ramo (ponderaciones, controles, eximicion) entra por la
         # lista blanca de onedrive.elegir_archivos, solo si esta declarado a mano.
@@ -526,7 +526,7 @@ def guardar_archivo(pendiente: dict, ramo: str, estado: dict, config: dict) -> N
     """Lo guarda en "<ramo>/Bot de IA/" en OneDrive, sin pisar nada. Si el texto
     que venia con el archivo es una pregunta, se la hace al modelo con el
     archivo a mano: puede ver una foto o leer un PDF."""
-    carpeta = onedrive.carpeta_del_ramo(ramo) / "Bot de IA"
+    carpeta = onedrive.carpeta_del_ramo(ramo, config) / "Bot de IA"
     nombre = Path(pendiente["nombre"])
     destino, n = carpeta / nombre.name, 2
     while destino.exists():

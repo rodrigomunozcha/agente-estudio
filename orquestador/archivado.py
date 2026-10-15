@@ -16,6 +16,13 @@ perder una clase por esto.
 El original que se reemplaza NUNCA se borra: comprimir_en_sitio lo mueve a
 "Grabaciones ya procesadas y por borrar/[Ramo]/", para que el estudiante lo
 borre el mismo cuando quiera. Este pipeline no borra archivos por su cuenta.
+
+Etapa 6 (parte 2), publicar_en_onedrive: cada clase vive en un solo lugar, la
+carpeta de su ramo en OneDrive, en "Clases/", con el audio comprimido, la
+transcripcion y la hoja juntos y con el mismo nombre (issue #1). El audio se
+mueve, para que el archivo pesado no exista dos veces. La transcripcion y la hoja
+se copian: Procesados/ y Output/ quedan como sala de trabajo del agente, porque
+la numeracion de las clases y la renumeracion de las hojas las leen alla.
 """
 import shutil
 from pathlib import Path
@@ -23,6 +30,9 @@ from pathlib import Path
 from .comprimir_notas_voz import comprimir_en_sitio
 from .ensayo import es_ensayo
 from .nombres import nombre_base
+from .onedrive import carpeta_del_ramo
+
+CLASES = "Clases"
 
 
 def archivar_audio(trabajo: dict, titulo: str, config: dict, bitacora=None) -> list[Path]:
@@ -67,3 +77,55 @@ def archivar_audio(trabajo: dict, titulo: str, config: dict, bitacora=None) -> l
             bitacora.archivo_creado(destino_txt)
         destinos.append(destino_txt)
     return destinos
+
+
+def _libre(ruta: Path) -> Path:
+    """Nunca pisar: mover encima de otro archivo lo reemplaza sin aviso, y eso es
+    borrarlo. Si el nombre esta ocupado, "nombre (2)"."""
+    destino, n = ruta, 2
+    while destino.exists():
+        destino, n = ruta.with_name(f"{ruta.stem} ({n}){ruta.suffix}"), n + 1
+    return destino
+
+
+def publicar_en_onedrive(archivados: list[Path], ruta_hoja: Path, ramo: str, config: dict,
+                         bitacora=None) -> Path | None:
+    """
+    Deja la clase en "<carpeta del ramo>/Clases/": mueve el audio y copia la
+    transcripcion y la hoja, todos con su nombre compartido. Devuelve la carpeta, o
+    None si no se pudo (el ramo no declara carpeta en config.json, OneDrive no esta,
+    o es un ensayo, que no puede dejar clases de mentira en la carpeta real). En ese
+    caso la clase queda entera en Procesados y Output, como antes: quien llama avisa.
+
+    Va dentro de la seccion critica de finalizar_clase, y cada cambio queda en la
+    bitacora: detener la corrida devuelve el audio y saca las copias.
+    """
+    if es_ensayo(config):
+        return None
+    carpeta = carpeta_del_ramo(ramo, config)
+    if carpeta is None or not carpeta.is_dir():
+        return None
+    clases = carpeta / CLASES
+    try:
+        if not clases.is_dir():
+            clases.mkdir()
+            if bitacora is not None:
+                bitacora.carpeta_creada(clases)
+        for origen in archivados:
+            destino = _libre(clases / origen.name)
+            if origen.suffix.lower() == ".txt":
+                shutil.copy2(origen, destino)
+                if bitacora is not None:
+                    bitacora.archivo_creado(destino)
+            else:
+                if bitacora is not None:
+                    bitacora.audio_movido(origen, destino)  # antes de mover, como archivar_audio
+                shutil.move(str(origen), str(destino))
+        if ruta_hoja.is_file():
+            destino = _libre(clases / ruta_hoja.name)
+            shutil.copy2(ruta_hoja, destino)
+            if bitacora is not None:
+                bitacora.archivo_creado(destino)
+    except OSError:
+        return None
+    return clases

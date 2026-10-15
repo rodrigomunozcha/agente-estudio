@@ -31,7 +31,7 @@ from pathlib import Path
 import anyio
 
 from . import cancelacion
-from .archivado import archivar_audio
+from .archivado import archivar_audio, publicar_en_onedrive
 from .carpetas import resolver_carpeta_ramo
 from .config import cargar_config, dir_pendientes, guardar_config
 from .hoja_html import TIMEOUT_SEGUNDOS as TIMEOUT_HOJA_SEGUNDOS
@@ -46,7 +46,6 @@ from .ensayo import es_ensayo
 from . import estado_vivo, evaluaciones, hoja_evaluacion, reuniones
 from .nombres import renumerar_clases_ramo
 from .notificaciones import notificar_aviso, notificar_error, notificar_exito, notificar_progreso
-from .onedrive import copiar_a_onedrive
 from .revisor import hallazgos_graves, revisar
 from .skill_runner import aplicar_skill, corregir_con_revision, normalizar_resultado
 
@@ -364,7 +363,10 @@ async def procesar_clase_reconocida(trabajo_metadata: dict, config: dict, bitaco
         ruta_hoja = escribir_hoja(ruta_de_hoja(trabajo, titulo, config), documento)
         if bitacora is not None:
             bitacora.archivo_creado(ruta_hoja)
-        archivar_audio(trabajo, titulo, config, bitacora)
+        archivados = archivar_audio(trabajo, titulo, config, bitacora)
+        # La clase en un solo lugar: audio, transcripcion y hoja juntos en
+        # "<ramo>/Clases/" de OneDrive (ver archivado.publicar_en_onedrive).
+        en_onedrive = publicar_en_onedrive(archivados, ruta_hoja, ramo, config, bitacora) is not None
 
     if trabajo.get("numeracion") == "orden":
         # Solo para ramos manuales (fuera del horario con calendario propio):
@@ -378,7 +380,11 @@ async def procesar_clase_reconocida(trabajo_metadata: dict, config: dict, bitaco
     # junto con el .docx: una clase termina en sus notas de Obsidian y en la
     # hoja, y nada mas. Las preguntas con sus respuestas modelo siguen en la
     # nota de aprendizaje.
-    en_onedrive = copiar_a_onedrive(ruta_hoja, config) is not None
+    if not en_onedrive and not es_ensayo(config):
+        notificar_aviso("La clase no llegó a OneDrive",
+                        f"{ramo}: está lista, pero no quedó entera en la carpeta Clases del ramo. Lo que "
+                        "falte sigue en Procesados y Output. Revisa que el ramo tenga su carpeta en "
+                        "carpetas_onedrive de config.json.")
     notificar_exito(trabajo, titulo, ruta_hoja, en_onedrive)
     await actualizar_hoja_de_evaluacion(ramo, trabajo.get("fecha", ""), config)
     return ruta_hoja

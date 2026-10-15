@@ -1912,79 +1912,67 @@ def probar_clase_completa_termina_en_notas_y_hoja() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
-def probar_copia_a_onedrive() -> None:
+def probar_clase_en_un_solo_lugar() -> None:
     """
-    La hoja de cada clase tiene que llegar sola a la carpeta del ramo en
-    OneDrive, que es la que el estudiante abre desde el iPhone. Se prueba con un
-    copiador falso que imita al de _herramientas (SEMESTRE, DESTINO, FUENTES, md5
-    y main), para no tocar la carpeta real.
+    Una clase termina en la carpeta de su ramo en OneDrive, en Clases/, con el audio,
+    la transcripcion y la hoja juntos y con el mismo nombre. El audio se mueve y lo
+    demas se copia: Procesados y Output quedan como sala de trabajo. Nunca pisa, no
+    toca la carpeta real en un ensayo, y detener la corrida lo deshace. La carpeta
+    del ramo sale de carpetas_onedrive en config.json. Todo en carpetas temporales.
     """
-    print("\n== la hoja de la clase llega a OneDrive ==")
-    import textwrap
+    print("\n== cada clase en un solo lugar ==")
+    from orquestador import archivado as ar
+    from orquestador.bitacora import Bitacora
 
-    from orquestador import onedrive as od
-
-    base = Path(tempfile.mkdtemp(prefix="onedrive_"))
-    salida = base / "Output" / "RAMO DE PRUEBA"
+    base = Path(tempfile.mkdtemp(prefix="clase_lugar_"))
+    ramo = "RAMO DE PRUEBA"
+    nombre = "09.09.26 - Una clase de prueba - Ramo de Prueba"
+    procesados, salida = base / "Procesados" / ramo, base / "Output" / ramo
+    procesados.mkdir(parents=True)
     salida.mkdir(parents=True)
-    hoja = salida / "Clase 01 - 2026-09-29 - Prueba.html"
-    hoja.write_text("<html>hoja</html>", encoding="utf-8")
-    semestre = base / "Semestre"
-    (semestre / "Ramo de prueba").mkdir(parents=True)
-    fuentes = [("Ramo de prueba", str(salida), "*.html")]
+    carpeta_ramo = base / "OneDrive" / "Ramo de prueba"
+    carpeta_ramo.mkdir(parents=True)
+    config = {"rutas": {"procesados": str(base / "Procesados"), "output": str(base / "Output")},
+              "carpetas_onedrive": {ramo: str(carpeta_ramo)}}
 
-    def copiador_falso(fuentes: list, falla: bool = False) -> Path:
-        ruta = base / f"copiador_{len(list(base.glob('copiador_*')))}.py"
-        ruta.write_text(textwrap.dedent(f"""
-            import hashlib, shutil
-            from pathlib import Path
-            SEMESTRE = Path({str(semestre)!r})
-            DESTINO = "Creada por Claude"
-            FUENTES = {fuentes!r}
-            def md5(p):
-                return hashlib.md5(Path(p).read_bytes()).hexdigest()
-            def main():
-                if {falla!r}:
-                    raise OSError("OneDrive no esta montado")
-                for ramo, origen, patron in FUENTES:
-                    destino = SEMESTRE / ramo / DESTINO
-                    destino.mkdir(exist_ok=True)
-                    for f in Path(origen).glob(patron):
-                        shutil.copy2(f, destino / f.name)
-        """), encoding="utf-8")
-        return ruta
+    def clase():
+        audio, txt, hoja = procesados / f"{nombre}.m4a", procesados / f"{nombre}.txt", salida / f"{nombre}.html"
+        audio.write_bytes(b"audio comprimido")
+        txt.write_text("transcripcion", encoding="utf-8")
+        hoja.write_text("<html>hoja</html>", encoding="utf-8")
+        return [audio, txt], hoja
 
-    avisos = []
-    originales = (od.COPIADOR, od.notificar_aviso)
-    od.notificar_aviso = lambda titulo, mensaje: avisos.append((titulo, mensaje))
     try:
-        od.COPIADOR = copiador_falso(fuentes)
-        copia = od.copiar_a_onedrive(hoja, {})
-        check("la hoja queda en Creada por Claude del ramo",
-              copia is not None and copia.parent == semestre / "Ramo de prueba" / "Creada por Claude"
-              and copia.read_bytes() == hoja.read_bytes(), str(copia))
-        check("y sin avisos", avisos == [], str(avisos))
+        archivados, hoja = clase()
+        clases = ar.publicar_en_onedrive(archivados, hoja, ramo, config)
+        check("audio, transcripción y hoja quedan juntos en Clases, con el mismo nombre",
+              clases == carpeta_ramo / "Clases"
+              and sorted(p.name for p in clases.iterdir()) == [f"{nombre}.html", f"{nombre}.m4a", f"{nombre}.txt"],
+              str(list(clases.iterdir())) if clases else "None")
+        check("el audio se mueve y no queda dos veces, la transcripción y la hoja se copian",
+              not archivados[0].exists() and archivados[1].is_file() and hoja.is_file())
 
-        check("en ensayo no toca OneDrive",
-              od.copiar_a_onedrive(hoja, {ensayo.CLAVE: True}) is None and avisos == [], str(avisos))
+        archivados, hoja = clase()
+        ar.publicar_en_onedrive(archivados, hoja, ramo, config)
+        check("una clase con el mismo nombre no pisa la que ya estaba",
+              (clases / f"{nombre} (2).m4a").is_file()
+              and (clases / f"{nombre}.m4a").read_bytes() == b"audio comprimido")
 
-        od.COPIADOR = copiador_falso([])
-        check("si su carpeta no esta en FUENTES, avisa y sigue",
-              od.copiar_a_onedrive(hoja, {}) is None and len(avisos) == 1
-              and "FUENTES" in avisos[0][1], str(avisos))
+        archivados, hoja = clase()
+        check("un ramo sin carpeta declarada no publica ni mueve nada",
+              ar.publicar_en_onedrive(archivados, hoja, "OTRO RAMO", config) is None and archivados[0].is_file())
+        check("en un ensayo no toca OneDrive",
+              ar.publicar_en_onedrive(archivados, hoja, ramo, dict(config, **{ensayo.CLAVE: True})) is None
+              and archivados[0].is_file())
 
-        avisos.clear()
-        od.COPIADOR = copiador_falso(fuentes, falla=True)
-        check("si OneDrive falla, avisa con el motivo y sigue",
-              od.copiar_a_onedrive(hoja, {}) is None and len(avisos) == 1
-              and "OneDrive no esta montado" in avisos[0][1], str(avisos))
-
-        avisos.clear()
-        od.COPIADOR = base / "no_existe.py"
-        check("si falta el copiador, avisa y sigue",
-              od.copiar_a_onedrive(hoja, {}) is None and len(avisos) == 1, str(avisos))
+        nuevo = dict(config, carpetas_onedrive={ramo: str(base / "OneDrive" / "Ramo nuevo")})
+        (base / "OneDrive" / "Ramo nuevo").mkdir()
+        b = Bitacora(base / "bitacora.json")
+        publicada = ar.publicar_en_onedrive(archivados, hoja, ramo, nuevo, b)
+        b.deshacer()
+        check("detener la corrida devuelve el audio y saca las copias",
+              publicada is not None and archivados[0].is_file() and not publicada.exists(), str(publicada))
     finally:
-        od.COPIADOR, od.notificar_aviso = originales
         shutil.rmtree(base, ignore_errors=True)
 
 
@@ -2223,23 +2211,16 @@ def probar_material_de_onedrive() -> None:
     check("nunca abre LinkedIn, .docx, libros, controles, lo del agente ni la raiz",
           not todos & prohibidos, str(todos & prohibidos))
 
-    original = od.COPIADOR
-    od.COPIADOR = semestre / "copiador.py"
-    od.COPIADOR.write_text(textwrap.dedent(f"""
-        from pathlib import Path
-        SEMESTRE = Path({str(semestre)!r})
-        FUENTES = [("Ramo X", "/no/importa/Output/RAMO X", "*.html")]
-    """), encoding="utf-8")
+    config = {"carpetas_onedrive": {"RAMO X": str(ramo)}}
     try:
-        material = {m["archivo"]: m for m in od.leer_material("RAMO X", "S2", "prueba")}
+        material = {m["archivo"]: m for m in od.leer_material("RAMO X", "S2", "prueba", None, config)}
         check("lee el texto de cada PDF",
               material.get("SOLEMNE-N2_RAMOX-PAUTA.pdf", {}).get("texto") == "Pregunta sobre oligopolio",
               str(material))
         check("y marca el escaneado como sin texto",
               material.get("Solemne-2-escaneada.pdf", {}).get("sin_texto") is True)
-        check("un ramo que no esta en FUENTES no trae material", od.leer_material("MIC", "S2", "prueba") == [])
+        check("un ramo sin carpeta declarada no trae material", od.leer_material("MIC", "S2", "prueba", None, config) == [])
     finally:
-        od.COPIADOR = original
         shutil.rmtree(semestre, ignore_errors=True)
 
 
@@ -2281,14 +2262,9 @@ def probar_hoja_por_evaluacion() -> None:
         _pdf_con_texto("Pregunta pasada sobre tema dos"))
     (semestre / "Ramo de prueba" / "Instrucciones-Trabajo.pdf").write_bytes(
         _pdf_con_texto("Entregar un informe"))
-    copiador = base / "copiador.py"
-    copiador.write_text(textwrap.dedent(f"""
-        from pathlib import Path
-        SEMESTRE = Path({str(semestre)!r})
-        FUENTES = [("Ramo de prueba", "/no/importa/Output/{ramo}", "*.html")]
-    """), encoding="utf-8")
     config = {"rutas": {"vault_obsidian": str(base / "vault"), "output": str(base / "Output")},
-              "carpetas_ramo": {ramo: str(carpeta)}}
+              "carpetas_ramo": {ramo: str(carpeta)},
+              "carpetas_onedrive": {ramo: str(semestre / "Ramo de prueba")}}
     salida = base / "Output" / ramo / "Evaluaciones" / "Solemne 2 - Ramo de Prueba.html"
     en_onedrive = semestre / "Ramo de prueba" / "Creada por Claude" / salida.name
 
@@ -2299,9 +2275,9 @@ def probar_hoja_por_evaluacion() -> None:
         pedidos.append((system_prompt, prompt))
         return (None, respuesta["motivo"]) if respuesta["motivo"] else (respuesta["cuerpo"], None)
 
-    originales = (ev.RUTA, od.COPIADOR, he.pedir_hoja, he.notificar_aviso,
+    originales = (ev.RUTA, he.pedir_hoja, he.notificar_aviso,
                   he.notificar_hoja_evaluacion, he.notificar_progreso)
-    ev.RUTA, od.COPIADOR, he.pedir_hoja = base / "evaluaciones.json", copiador, pedir_falso
+    ev.RUTA, he.pedir_hoja = base / "evaluaciones.json", pedir_falso
     he.notificar_aviso = lambda titulo, mensaje: avisos.append((titulo, mensaje))
     he.notificar_hoja_evaluacion = lambda *a: hojas.append(a)
     he.notificar_progreso = lambda *a, **kw: None
@@ -2364,7 +2340,7 @@ def probar_hoja_por_evaluacion() -> None:
               and "Pregunta pasada" not in prompt
               and "Hoja del trabajo" in salida.read_text(encoding="utf-8"))
     finally:
-        (ev.RUTA, od.COPIADOR, he.pedir_hoja, he.notificar_aviso,
+        (ev.RUTA, he.pedir_hoja, he.notificar_aviso,
          he.notificar_hoja_evaluacion, he.notificar_progreso) = originales
         shutil.rmtree(base, ignore_errors=True)
 
@@ -2666,14 +2642,9 @@ def probar_bot_de_telegram() -> None:
     vault.mkdir(parents=True)
     semestre = base / "Semestre"
     (semestre / "Ramo de prueba").mkdir(parents=True)
-    copiador = base / "copiador.py"
-    copiador.write_text(textwrap.dedent(f"""
-        from pathlib import Path
-        SEMESTRE = Path({str(semestre)!r})
-        FUENTES = [("Ramo de prueba", "/no/importa/Output/{ramo}", "*.html")]
-    """), encoding="utf-8")
     config = {"rutas": {"output": str(base / "Output"), "vault_obsidian": str(base / "vault")},
               "carpetas_ramo": {ramo: str(vault)},
+              "carpetas_onedrive": {ramo: str(semestre / "Ramo de prueba")},
               "ramos": {"lunes": {"nombre": ramo, "inicio": "08:30", "fin": "10:00", "sala": "A-101"}}}
     datos = {"ramos": {ramo: [{"nombre": "S2", "fecha": "2026-11-09", "tipo": "prueba",
                                "fuente": "clase", "clase": "2026-09-28",
@@ -2701,7 +2672,7 @@ def probar_bot_de_telegram() -> None:
     cambios = []  # (mensaje, botones con que queda) de cada cambiar_botones
     tg = b.telegram
     originales = (tg.enviar, tg.editar, tg.escribiendo, tg.responder_boton, tg.descargar,
-                  b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.cambiar_botones,
+                  b._preguntar, b.RUTA_ESTADO, ev.RUTA, b.cargar_config, tg.cambiar_botones,
                   b.RUTA_OPINIONES)
     tg.enviar, tg.editar = enviar, (lambda mid, texto, chat_id=None: editados.append(texto))
     tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
@@ -2714,7 +2685,7 @@ def probar_bot_de_telegram() -> None:
         return "si" in datos_de(teclado)
     tg.escribiendo, tg.responder_boton, tg.descargar = (lambda *a: None), (lambda *a: None), descargar
     b._preguntar, b.RUTA_ESTADO = preguntar_falso, base / "bot_estado.json"
-    ev.RUTA, od.COPIADOR, b.cargar_config = base / "evaluaciones.json", copiador, (lambda: config)
+    ev.RUTA, b.cargar_config = base / "evaluaciones.json", (lambda: config)
     ev.guardar(datos)
 
     def mensaje(texto=None, chat=1, **extra):
@@ -3001,7 +2972,7 @@ def probar_bot_de_telegram() -> None:
         check("a cualquier otro chat no le contesta", len(enviados) == antes)
     finally:
         (tg.enviar, tg.editar, tg.escribiendo, tg.responder_boton, tg.descargar,
-         b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.cambiar_botones,
+         b._preguntar, b.RUTA_ESTADO, ev.RUTA, b.cargar_config, tg.cambiar_botones,
          b.RUTA_OPINIONES) = originales
         shutil.rmtree(base, ignore_errors=True)
 
