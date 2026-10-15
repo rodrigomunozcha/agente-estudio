@@ -14,7 +14,18 @@ secretaria importan este paquete, y los procesos hijos (el CLI de Claude) hereda
 la politica. Si falla, no se hace nada: el error de lectura sigue diciendo que pasa.
 """
 import ctypes
+import os
 import sys
+
+# Homebrew (ffmpeg y ffprobe, que mlx-whisper y la fecha de las grabaciones necesitan) no
+# esta en el PATH minimo con el que macOS lanza apps y LaunchAgents. Sin esto, la
+# transcripcion de audios reales falla en silencio (visto en vivo con el agente de
+# launchd). Vivia en procesar_input.py y se movio aqui el 15-10-2026: verificar, corrido
+# como lo corre launchd, decia que ffmpeg y node no estaban instalados, y el bot y la
+# secretaria tampoco lo tenian.
+if "/opt/homebrew/bin" not in os.environ.get("PATH", "").split(":"):
+    os.environ["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:" + os.environ.get(
+        "PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
 
 if sys.platform == "darwin":
     try:

@@ -12,16 +12,7 @@ osacompile): toda la comunicacion con el estudiante pasa por notificaciones
 nativas de macOS (ver notificaciones.py), nunca por texto en una consola
 que nadie va a ver.
 """
-import os
-
-# Homebrew (ffmpeg, que mlx-whisper necesita para decodificar audio real) no
-# esta en el PATH minimo con el que macOS lanza apps fuera de una Terminal
-# interactiva. Sin esto, la transcripcion de audios reales falla en silencio
-# (bug real, visto en vivo con el agente de launchd antes de corregirlo).
-os.environ["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:" + os.environ.get(
-    "PATH", "/usr/bin:/bin:/usr/sbin:/sbin"
-)
-
+# Homebrew entra al PATH en orquestador/__init__.py, que corre antes que este modulo.
 import sys
 import time
 from pathlib import Path
