@@ -73,7 +73,9 @@ El camino de una clase:
 5. `notificaciones` avisa en el Mac y repite en Telegram solo los avisos finales.
 
 Una grabación con ramo `REUNIÓN` se desvía a `reuniones.py`. Deja una nota en `Reuniones/`
-del vault y un `.docx` en OneDrive, manda las acciones a los pendientes y ofrece un botón
+del vault y un `.docx` en OneDrive, manda las acciones a los pendientes y las promesas con
+plazo de la otra parte como seguimientos (solo lo que tiene cita en la transcripción, que
+Python comprueba) y ofrece un botón
 que abre Google Calendar con el evento lleno.
 
 Datos de estado (cuáles quedan fuera de git lo dice `.gitignore`):

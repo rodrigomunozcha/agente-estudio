@@ -106,15 +106,17 @@ def registrar_clase(ramo: str, anuncios: list, avisos: list, fecha_clase: str, t
 
 
 def anotar_pendiente(ramo: str, fecha: str, que: str, origen: str, *, textual: str = "",
-                     clase: str = "", reunion: str = "", ensayo: bool = False) -> bool:
+                     clase: str = "", reunion: str = "", tipo: str = "", ensayo: bool = False) -> bool:
     """Un pendiente del chat o de una reunion. False si ya estaba (mismo ramo,
-    fecha y texto): repetirlo no lo duplica."""
+    fecha y texto): repetirlo no lo duplica. tipo "seguimiento" es una promesa de la
+    otra parte en una reunion: la secretaria pregunta ese dia si se cumplio."""
     with _modificando(ensayo=ensayo) as datos:
         pendientes = datos.setdefault("pendientes", [])
         if any((p.get("ramo"), p.get("fecha"), p.get("que")) == (ramo, fecha, que) for p in pendientes):
             return False
         nuevo = {"ramo": ramo, "fecha": fecha, "que": que, "origen": origen}
-        nuevo.update({k: v for k, v in (("textual", textual), ("clase", clase), ("reunion", reunion)) if v})
+        nuevo.update({k: v for k, v in (("textual", textual), ("clase", clase), ("reunion", reunion),
+                                        ("tipo", tipo)) if v})
         pendientes.append(nuevo)
     return True
 

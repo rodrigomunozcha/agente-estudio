@@ -2987,6 +2987,7 @@ def probar_reuniones() -> None:
 
     analisis = {
         "titulo": "Entrevista grupal en Empresa Ejemplo", "tipo": "entrevista",
+        "una_linea": "Entrevista grupal de práctica en Empresa Ejemplo",
         "calidad_audio": "mala, el teléfono iba en el bolsillo",
         "resumen": "Entrevista grupal con Nombre Apellido, de selección.",
         "decisiones": [],
@@ -2995,7 +2996,14 @@ def probar_reuniones() -> None:
              "fecha": "2026-10-05", "hora": None, "lugar": None, "presencial": False,
              "cita": "mándame tu cv corregido el lunes"},
             {"que": "Algo que ya pasó", "quien": "el estudiante", "fecha": "2026-09-01"},
-            {"que": "Algo sin fecha", "quien": "Nombre Apellido", "fecha": None}],
+            {"que": "Algo sin fecha", "quien": "Nombre Apellido", "fecha": None},
+            {"que": "Llamar al gerente", "quien": "el estudiante", "fecha": "2026-10-06",
+             "cita": "una frase que nadie dijo en la entrevista"}],
+        "seguimientos": [
+            {"que": "Avisar si pasa a la segunda etapa", "quien": "la empresa", "cuando": "en una semana",
+             "fecha": None, "plazo_dias": 7, "cita": "te respondemos en una semana como mucho"},
+            {"que": "Mandar el contrato", "quien": "la empresa", "fecha": "2026-10-02",
+             "cita": "promesa que no aparece en la grabación"}],
         "preguntas_abiertas": ["Cuándo avisan el resultado"],
         "entrevista": {"preguntas": [{"pregunta": "Háblame de ti", "tu_respuesta": "Conté mi carrera",
                                       "como_mejorarla": "Partir por el logro principal"}],
@@ -3004,6 +3012,8 @@ def probar_reuniones() -> None:
                         "explicacion": "Es una caja de compensación.", "fuentes": ["conocimiento general"]}],
     }
     texto = f"bla bla\n{re_.MARCA_INICIO}\n{_json.dumps(analisis, ensure_ascii=False)}\n{re_.MARCA_FIN}\n"
+    transcripcion = ("hola a todos... mándame tu CV corregido el lunes, por favor. Y nosotros te "
+                     "respondemos en una semana como mucho.")
     check("lee el analisis entre las marcas", re_.extraer(texto)["titulo"] == analisis["titulo"])
     check("un analisis sin titulo o con JSON roto no se acepta",
           re_.extraer(texto.replace('"titulo"', '"otro"')) is None
@@ -3019,7 +3029,7 @@ def probar_reuniones() -> None:
     ev.guardar({"ramos": {}, "pendientes": []})
     try:
         datos = re_.extraer(texto)
-        nota, docx = re_.guardar(datos, "2026-09-29", "Entrevista grupal.m4a", config)
+        nota, docx = re_.guardar(datos, "2026-09-29", "Entrevista grupal.m4a", config, transcripcion)
         md = nota.read_text(encoding="utf-8")
         check("deja la nota en Reuniones/ de la boveda, con el nombre de la persona",
               nota.parent.name == "Reuniones" and nota.name.startswith("Reunión - 2026-09-29")
@@ -3031,13 +3041,28 @@ def probar_reuniones() -> None:
         check("y un .docx en la carpeta de OneDrive",
               docx.parent == base / "OneDrive" and doc.paragraphs[0].text == analisis["titulo"])
         pendientes = ev.cargar()["pendientes"]
-        check("solo la accion con fecha futura queda para la secretaria",
-              [p["fecha"] for p in pendientes] == ["2026-10-05"] and pendientes[0]["origen"] == "reunion")
-        _, docx2 = re_.guardar(datos, "2026-09-29", "Entrevista grupal.m4a", config)
-        check("repetirla no pisa el .docx ni duplica el pendiente",
-              docx2.name.endswith("(2).docx") and len(ev.cargar()["pendientes"]) == 1, docx2.name)
-        check("y avisa con el resumen y las acciones",
-              "Mandar el CV corregido" in avisos[0][1] and avisos[0][2] == docx)
+        acciones = [p for p in pendientes if p.get("tipo") != "seguimiento"]
+        check("solo la accion con fecha futura y cita en la grabacion queda para la secretaria",
+              [p["fecha"] for p in acciones] == ["2026-10-05"] and acciones[0]["origen"] == "reunion",
+              str(acciones))
+        seguimientos = [p for p in pendientes if p.get("tipo") == "seguimiento"]
+        check("una promesa con plazo de la otra parte queda como seguimiento, con la fecha calculada",
+              [(p["fecha"], p["que"]) for p in seguimientos]
+              == [("2026-10-06", "Avisar si pasa a la segunda etapa (la empresa)")], str(seguimientos))
+        check("la accion sin cita en la grabacion queda en la nota marcada para verificar",
+              "Llamar al gerente" in md and "verifícala" in md)
+        _, docx2 = re_.guardar(re_.extraer(texto), "2026-09-29", "Entrevista grupal.m4a", config, transcripcion)
+        check("repetirla no pisa el .docx ni duplica los pendientes",
+              docx2.name.endswith("(2).docx") and len(ev.cargar()["pendientes"]) == 2, docx2.name)
+        aviso = avisos[0][1]
+        check("avisa con una linea de que fue, las acciones con fecha y los seguimientos",
+              aviso.startswith("📝 Entrevista grupal de práctica en Empresa Ejemplo")
+              and "Mandar el CV corregido - el estudiante, 05-10" in aviso
+              and "⏳ Seguimientos\n• Avisar si pasa a la segunda etapa - la empresa, 06-10" in aviso
+              and avisos[0][2] == docx, aviso)
+        check("sin afirmar lo que no tiene cita ni repetir el resumen largo",
+              "Llamar al gerente" not in aviso and "Mandar el contrato" not in aviso
+              and analisis["resumen"] not in aviso, aviso)
         texto9, _ = se.resumen(date(2026, 10, 5), ev.cargar(), config)
         check("el dia que toca, la secretaria lo recuerda como de una reunion",
               "de tus reuniones" in (texto9 or "") and "Mandar el CV corregido" in texto9, str(texto9))
@@ -3114,11 +3139,12 @@ def probar_enlace_de_calendario() -> None:
                  "acciones": [con_hora,
                               {"que": "Mandar el CV", "fecha": "2026-10-05", "evento": False},
                               {"que": "Llamada sin fecha", "fecha": None, "evento": True}]}
-        re_.guardar(datos, "2026-09-29", "Entrevista.m4a", config)
+        dicho = "y bueno nos vemos el jueves ocho a las diez entonces"
+        re_.guardar(datos, "2026-09-29", "Entrevista.m4a", config, dicho)
         check("solo el evento con fecha se ofrece para el calendario",
               [q for q, _ in eventos] == ["Segunda entrevista"], str(eventos))
         eventos.clear()
-        re_.guardar(datos, "2026-09-29", "Entrevista.m4a", dict(config, **{ensayo.CLAVE: True}))
+        re_.guardar(datos, "2026-09-29", "Entrevista.m4a", dict(config, **{ensayo.CLAVE: True}), dicho)
         check("en ensayo no ofrece eventos", eventos == [])
     finally:
         re_.CARPETA_DOCX, re_.notificar_reunion, re_.notificar_evento, ev.RUTA = originales

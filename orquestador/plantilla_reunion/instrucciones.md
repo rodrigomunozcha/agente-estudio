@@ -19,6 +19,9 @@ inventada, una fecha mal escuchada o una promesa que nadie hizo le hacen quedar 
   la fecha va solo si se puede saber sin adivinar a partir de la fecha de la reunión.
 - Si no se sabe quién dijo algo, escribe "alguien del grupo" o "el entrevistador" en vez de
   suponer.
+- Cada "cita" es la frase copiada tal cual de la transcripción, sin corregirla ni
+  resumirla. Python la busca en la transcripción: una acción cuya cita no está no se le
+  afirma al estudiante, y un seguimiento cuya cita no está se descarta.
 - Los nombres de las personas sí van, si se escucharon: el estudiante lo pidió. Correos,
   teléfonos, RUT, direcciones o datos bancarios no van nunca, aunque se hayan dicho. Si una
   acción los necesita, di que están en la grabación.
@@ -31,6 +34,7 @@ exactamente `===REUNION_FIN===`. Nada antes ni después. Con esta forma:
 ```json
 {
   "titulo": "Tema de la conversación, corto y concreto",
+  "una_linea": "Qué fue, en una línea que se lea caminando: con quién y para qué",
   "tipo": "reunion o entrevista",
   "calidad_audio": "buena, regular o mala, con una frase de por qué",
   "resumen": "De qué se habló, en cuatro a ocho líneas",
@@ -46,6 +50,16 @@ exactamente `===REUNION_FIN===`. Nada antes ni después. Con esta forma:
       "presencial": "true si hay que ir a algún lugar, false si es en línea o no aplica, null si no se sabe",
       "evento": "true si es un encuentro que va en el calendario (una entrevista, una reunión, una visita), false si es una tarea",
       "cita": "La frase de la transcripción que lo respalda"
+    }
+  ],
+  "seguimientos": [
+    {
+      "que": "Lo que la otra parte prometió hacer: responder, mandar algo, avisar un resultado",
+      "quien": "Quién lo prometió: la empresa, una persona por su nombre o su rol",
+      "cuando": "El plazo como se dijo",
+      "fecha": "AAAA-MM-DD si se dijo una fecha que se puede saber sin adivinar, o null",
+      "plazo_dias": "Si el plazo fue relativo ('en una semana', 'en diez días'), cuántos días desde la reunión. Null si no",
+      "cita": "La frase de la transcripción donde lo prometió"
     }
   ],
   "preguntas_abiertas": ["Lo que quedó sin resolver"],
@@ -78,6 +92,14 @@ Si fue una entrevista de trabajo, `entrevista` no va en null, sino así:
 ```
 
 "como_mejorarla" es tu sugerencia, no algo que se dijo: escríbela como sugerencia.
+
+## Acciones y seguimientos no son lo mismo
+
+Una acción es algo que tiene que hacer el estudiante o su grupo. Un seguimiento es algo que
+prometió la otra parte con un plazo: "te respondemos en una semana", "el lunes te mando el
+contrato". El estudiante no lo hace, pero tiene que saber si se cumplió, y el sistema le
+pregunta el día que vence. Una promesa sin plazo no es un seguimiento: va en
+preguntas_abiertas. Si no hubo promesas con plazo, la lista va vacía.
 
 ## Lo que hay que investigar
 
