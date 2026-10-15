@@ -3428,6 +3428,152 @@ def probar_fecha_que_trae_el_audio() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_pregunta_de_ramo_por_telegram() -> None:
+    """
+    Una grabacion cuyo nombre dice el ramo y la fecha se procesa sin preguntar. Cualquier
+    otra duda se pregunta por Telegram con un boton por ramo, Reunion y No es una clase, y
+    la grabacion espera sin procesarse. La respuesta la anota el bot, y la corrida
+    siguiente la procesa. Se recuerda una sola vez. La ventana del Mac no aparece en
+    ningun camino. Telegram, Whisper y el lanzamiento del procesamiento son falsos.
+    """
+    print("\n== la pregunta de ramo va por Telegram ==")
+    import json
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    from orquestador import bot as b
+    from orquestador import pantalla_confirmacion as pc
+    from orquestador import pregunta_ramo as pr
+    from orquestador import procesar_input as pi
+    from orquestador import transcripcion
+
+    base = Path(tempfile.mkdtemp(prefix="pregunta_ramo_"))
+    entrada = base / "Input"
+    entrada.mkdir()
+    config = {"rutas": {"input": str(entrada), "procesados": str(base / "Procesados"), "output": str(base / "Output")},
+              "semestre": {"fecha_inicio": "2026-08-03"},
+              "ramos": {"lunes": {"nombre": "MICROECONOMIA AVANZADA", "perfil_whisper": "es-chile"}},
+              "ramos_adicionales": {"REUNIÓN": {"perfil_whisper": "es-chile", "contexto": ""}}}
+
+    def trabajo(nombre, fecha, ramo_por_dia=None):
+        ruta = entrada / nombre
+        ruta.write_bytes(b"audio")
+        return {"clave": f"{fecha}|{nombre}", "fecha": fecha, "dia_semana": "lunes", "archivos": [str(ruta)],
+                "reconocido": ramo_por_dia is not None, "ramo": ramo_por_dia, "perfil_whisper": "es-chile",
+                "numero_clase": 1}
+
+    claro = trabajo("Microeconomia avanzada 05.10.26.m4a", "2026-10-05")
+    del_dia = trabajo("Grabación nueva 7.m4a", "2026-10-05", "MICROECONOMIA AVANZADA")
+    raro = trabajo("Audio 12.m4a", "2026-10-07")
+    trabajos = [claro, del_dia, raro]
+    avisos, transcritos, enviados, cambios, lanzados = [], [], [], [], []
+    telegram_ok = [True]
+    tg = b.telegram
+    originales = (pr.RUTA, tg.avisar, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.lanzar_procesamiento,
+                  b.RUTA_ESTADO, b.cargar_config, pc.preguntar, transcripcion.construir_trabajos,
+                  transcripcion.transcribir_trabajo, transcripcion.notificar_aviso, deteccion.TRABAJOS_EMITIDOS_PATH)
+    pr.RUTA = base / "preguntas.json"
+    tg.avisar = lambda texto, adjunto=None, teclado=None: telegram_ok[0] and (avisos.append((texto, teclado)) or True)
+    tg.enviar = lambda texto, chat_id=None, teclado=None: enviados.append(texto) or {"message_id": 1}
+    tg.responder_boton = lambda *a: None
+    tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
+    b.lanzar_procesamiento = lambda: lanzados.append(1)
+    b.RUTA_ESTADO, b.cargar_config = base / "estado.json", (lambda: config)
+    ventanas = []
+    pc.preguntar = lambda *a: ventanas.append(1)
+    transcripcion.construir_trabajos = lambda c: [dict(t) for t in trabajos]
+    transcripcion.transcribir_trabajo = lambda t, c: transcritos.append(Path(t["archivos"][0]).name) or "texto"
+    transcripcion.notificar_aviso = lambda *a: None
+    deteccion.TRABAJOS_EMITIDOS_PATH = base / "emitidos.json"
+    usar_dir_pendientes(base / "pendientes")
+
+    def tocar(dato):
+        b.atender({"callback_query": {"id": "x", "data": dato, "message": {"chat": {"id": 1}, "message_id": 5}}}, 1)
+
+    def botones(teclado):
+        return [x["text"] for fila in teclado["inline_keyboard"] for x in fila]
+
+    try:
+        transcripcion.procesar_pendientes(config)
+        check("con el ramo y la fecha en el nombre se procesa sin preguntar",
+              transcritos == ["Microeconomia avanzada 05.10.26.m4a"], str(transcritos))
+        check("lo demás se pregunta por Telegram, y espera sin procesarse",
+              len(avisos) == 2 and "Grabación nueva 7.m4a" not in transcritos and "Audio 12.m4a" not in transcritos)
+        texto, teclado = avisos[0]
+        check("con un botón por ramo, Reunión y No es una clase",
+              botones(teclado) == ["Microeconomia Avanzada", "Reunión", "No es una clase"], str(botones(teclado)))
+        check("y si el día sugiere un ramo, lo dice", "👉 Por el día, parece de Microeconomia Avanzada" in texto, texto)
+        check("la que espera queda marcada como esperando", pr.esperando(Path(del_dia["archivos"][0])))
+
+        transcripcion.procesar_pendientes(config)
+        check("una corrida siguiente no vuelve a preguntar", len(avisos) == 2)
+
+        id_del_dia = next(p["id"] for p in json.loads(pr.RUTA.read_text()).values() if "nueva 7" in p["clave"])
+        id_raro = next(p["id"] for p in json.loads(pr.RUTA.read_text()).values() if "Audio 12" in p["clave"])
+        tocar(f"grab:{id_del_dia}:1")
+        check("el bot anota la respuesta, quita los botones y relanza el procesamiento",
+              "como una reunión" in enviados[-1] and cambios[-1] == (5, None) and lanzados == [1]
+              and not pr.esperando(Path(del_dia["archivos"][0])), str(enviados[-1:]))
+        tocar(f"grab:{id_del_dia}:0")
+        check("tocar otro botón después no cambia la respuesta", "ya tiene respuesta" in enviados[-1] and lanzados == [1])
+
+        transcripcion.procesar_pendientes(config)
+        meta = [json.loads(m.read_text()) for m in (base / "pendientes").glob("*.json")]
+        check("la corrida siguiente la procesa con lo que respondió",
+              "Grabación nueva 7.m4a" in transcritos and any(m["ramo"] == "REUNIÓN" for m in meta), str(meta))
+
+        tocar(f"grab:{id_raro}:2")
+        transcripcion.procesar_pendientes(config)
+        check("No es una clase la transcribe sin tratarla como clase",
+              "Audio 12.m4a" in transcritos and (base / "Output" / "Sin clasificar").is_dir()
+              and not Path(raro["archivos"][0]).exists())
+        check("la ventana del Mac no apareció en ningún camino", ventanas == [])
+
+        # Recordatorio: una vez, solo pasado el plazo, y no si la grabacion ya no esta.
+        tarde = trabajo("Grabación nueva 9.m4a", "2026-10-12")
+        trabajos[:] = [tarde]
+        transcripcion.procesar_pendientes(config)
+        antes = len(avisos)
+        check("no recuerda antes de tiempo", pr.recordar(_dt.now()) == 0)
+        check("pasado el plazo la recuerda una vez, con los mismos botones",
+              pr.recordar(_dt.now() + _td(hours=4)) == 1 and avisos[-1][0].startswith("⏰ Sigue esperando")
+              and botones(avisos[-1][1]) == botones(avisos[antes - 1][1]))
+        check("y no la vuelve a recordar", pr.recordar(_dt.now() + _td(hours=30)) == 0)
+
+        telegram_ok[0] = False
+        sin_red = trabajo("Grabación nueva 10.m4a", "2026-10-12")
+        trabajos[:] = [sin_red]
+        transcripcion.procesar_pendientes(config)
+        check("si la pregunta no se pudo enviar, no queda esperando una respuesta que no llegará",
+              not pr.esperando(Path(sin_red["archivos"][0])))
+
+        # Si lo unico en Input espera respuesta, la corrida termina sin avisar "copiando".
+        mac = []
+        orig_pi = (pi.lock.adquirir_no_bloqueante, pi.lock.liberar, pi.cargar_config, pi.notificar_aviso,
+                   pi.notificar_inicio, pi.estado_vivo.limpiar)
+        pi.lock.adquirir_no_bloqueante, pi.lock.liberar = (lambda: object()), (lambda f: None)
+        pi.cargar_config, pi.notificar_aviso = (lambda: config), (lambda t, m: mac.append(t))
+        pi.notificar_inicio, pi.estado_vivo.limpiar = (lambda n: mac.append("inicio")), (lambda: None)
+        try:
+            for audio in entrada.iterdir():  # solo queda la que espera respuesta
+                if audio.name != "Grabación nueva 9.m4a":
+                    audio.unlink()  # archivo de prueba en una carpeta temporal
+            pi.main()
+            silencio = list(mac)
+            pi.main(avisar_si_espera=True)
+        finally:
+            (pi.lock.adquirir_no_bloqueante, pi.lock.liberar, pi.cargar_config, pi.notificar_aviso,
+             pi.notificar_inicio, pi.estado_vivo.limpiar) = orig_pi
+        check("si todo espera respuesta, la corrida automática termina en silencio", silencio == [], str(silencio))
+        check("y un clic en la app dice que espera tu respuesta", mac == ["Esperando tu respuesta"], str(mac))
+    finally:
+        (pr.RUTA, tg.avisar, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.lanzar_procesamiento,
+         b.RUTA_ESTADO, b.cargar_config, pc.preguntar, transcripcion.construir_trabajos,
+         transcripcion.transcribir_trabajo, transcripcion.notificar_aviso, deteccion.TRABAJOS_EMITIDOS_PATH) = originales
+        usar_dir_pendientes(None)
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def probar_enlace_de_calendario() -> None:
     """
     Un evento que sale de una reunion se ofrece con un boton que abre Google

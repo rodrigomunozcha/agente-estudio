@@ -18,7 +18,7 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import evaluaciones, telegram
+from . import evaluaciones, pregunta_ramo, telegram
 from .carpetas import resolver_carpeta_ramo
 from .config import cargar_config
 from .hoja_evaluacion import NOMBRES, clases_del_ramo, nombre_archivo, ramo_legible
@@ -213,6 +213,9 @@ def main() -> None:
             _enviar_con_paciencia(telegram.enviar_documento, hoja, hoja.stem)
     for texto_seg, botones in seguimientos(datos, hoy):
         _enviar_con_paciencia(telegram.enviar, texto_seg, teclado=botones)
+    # Las grabaciones que siguen esperando de que son se recuerdan una vez, aqui: es lo
+    # unico que corre todos los dias aunque no llegue nada nuevo.
+    pregunta_ramo.recordar()
 
 
 if __name__ == "__main__":

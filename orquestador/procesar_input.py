@@ -22,12 +22,13 @@ os.environ["PATH"] = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:" + os
     "PATH", "/usr/bin:/bin:/usr/sbin:/sbin"
 )
 
+import sys
 import time
 from pathlib import Path
 
 import anyio
 
-from . import bitacora, cancelacion, deteccion, estado_vivo, lock, notificaciones
+from . import bitacora, cancelacion, deteccion, estado_vivo, lock, notificaciones, pregunta_ramo
 from .config import cargar_config
 from .finalizar_clase import procesar_pendientes_reconocidos
 from .notificaciones import notificar_aviso, notificar_inicio
@@ -53,7 +54,10 @@ async def _procesar_async(config: dict, registro) -> bool:
     return bool(trabajos) or bool(generados)
 
 
-def main() -> None:
+def main(avisar_si_espera: bool = False) -> None:
+    """avisar_si_espera es para el clic en la app: si todo lo de Input espera una
+    respuesta por Telegram, se lo dice. Cuando lo lanzan el vigilante o el bot, eso
+    mismo termina en silencio: un aviso cada 10 minutos se aprende a ignorar."""
     lock_file = lock.adquirir_no_bloqueante()
     if lock_file is None:
         notificar_aviso("Ya hay algo corriendo", "Espera a que termine antes de hacer clic de nuevo.")
@@ -69,6 +73,16 @@ def main() -> None:
                 "Nada que procesar",
                 "Deja tus grabaciones en la carpeta Input y vuelve a hacer clic.",
             )
+            return
+
+        # Lo que espera una respuesta por Telegram no se vuelve a preguntar ni se toca:
+        # si no hay nada mas, no hay corrida (pregunta_ramo.py).
+        pendientes = [a for a in pendientes if not pregunta_ramo.esperando(a)]
+        if not pendientes:
+            estado_vivo.limpiar()
+            if avisar_si_espera:
+                notificar_aviso("Esperando tu respuesta",
+                                "Las grabaciones de Input esperan que me digas por Telegram de qué son.")
             return
 
         notificar_inicio(len(pendientes))
@@ -120,4 +134,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # --esperar: lo usa el bot despues de una respuesta por Telegram. Espera a que
+    # termine lo que este corriendo, igual que el vigilante, en vez de rendirse.
+    if "--esperar" in sys.argv:
+        lock.liberar(lock.adquirir_bloqueante())
+        main()
+    else:
+        main(avisar_si_espera=True)

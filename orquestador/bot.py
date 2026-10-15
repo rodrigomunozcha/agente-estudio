@@ -34,6 +34,7 @@ Uso:
 """
 import json
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -51,7 +52,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-from . import evaluaciones, memoria, onedrive, reuniones, secretaria, telegram
+from . import evaluaciones, memoria, onedrive, pregunta_ramo, reuniones, secretaria, telegram
 from .config import cargar_config, guardar_config
 from .hoja_evaluacion import NOMBRES, ramo_legible
 from .hoja_html import HERRAMIENTAS_PROHIBIDAS
@@ -607,6 +608,8 @@ def atender_boton(cb: dict, estado: dict, config: dict) -> None:
         responder_seguimiento(dato, mensaje)
     elif dato.startswith("mem:"):
         responder_memoria(dato, mensaje, config)
+    elif dato.startswith("grab:"):
+        responder_grabacion(dato, mensaje)
     elif dato.startswith("ramo:") and pendiente.get("tipo") == "archivo":
         ramos = ramos_con_carpeta(config)
         i = int(dato[5:])
@@ -656,6 +659,40 @@ def responder_memoria(dato: str, mensaje: int | None, config: dict) -> None:
         telegram.cambiar_botones(mensaje, None)
     telegram.enviar(aplicar_accion({"tipo": "memoria", "recuerdo": recuerdo}, config) if respuesta == "si"
                     else "👌 Listo, no guardé nada.")
+
+
+def lanzar_procesamiento() -> None:
+    """Procesa Input aparte, sin esperar: transcribir una clase toma mas de 20 minutos y
+    el bot tiene que seguir atendiendo. --esperar hace que espere su turno si ya hay
+    una corrida, en vez de rendirse."""
+    registro = Path(__file__).parent / "logs" / "procesar_desde_bot.log"
+    registro.parent.mkdir(parents=True, exist_ok=True)
+    with open(registro, "a") as salida:
+        subprocess.Popen([sys.executable, "-m", "orquestador.procesar_input", "--esperar"],
+                         cwd=str(PROJECT_ROOT), stdout=salida, stderr=subprocess.STDOUT,
+                         start_new_session=True)
+
+
+def responder_grabacion(dato: str, mensaje: int | None) -> None:
+    """Los botones de "¿De qué es esta grabación?" (pregunta_ramo.preguntar)."""
+    _, id_pregunta, indice = (dato.split(":") + ["", ""])[:3]
+    try:
+        p = pregunta_ramo.responder(id_pregunta, int(indice)) if indice.isdigit() else None
+    except pregunta_ramo.CandadoOcupado:
+        telegram.enviar("⏳ No pude anotarlo: justo se estaba guardando otra cosa. Tócalo de nuevo en un momento.")
+        return
+    if p is None:
+        telegram.enviar("⌛ Esa grabación ya tiene respuesta.")
+        return
+    if mensaje:
+        telegram.cambiar_botones(mensaje, None)
+    r = p["respuesta"]
+    if r["que_hacer"] == pregunta_ramo.PROCESAR:
+        que = "una reunión" if r["ramo"] == pregunta_ramo.REUNION else f"una clase de {ramo_legible(r['ramo'])}"
+        telegram.enviar(f"👌 Listo: la proceso como {que}. Te aviso cuando esté.")
+    else:
+        telegram.enviar("👌 Listo: la transcribo sin tratarla como clase. El texto queda en Output/Sin clasificar.")
+    lanzar_procesamiento()
 
 
 def atender(actualizacion: dict, chat: int) -> None:

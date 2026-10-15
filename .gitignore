@@ -45,6 +45,11 @@ orquestador/bot_estado.json
 # Lo que se ofrecio guardar en la wiki despues de una reunion (reuniones.ofrecer_memoria):
 # trae lo que se hablo con una organizacion.
 orquestador/propuestas_memoria/
+# Las grabaciones que esperan que el estudiante diga de que son (pregunta_ramo.py):
+# traen nombres de archivos y rutas de este Mac.
+orquestador/preguntas_grabaciones.json
+orquestador/preguntas_grabaciones.lock
+orquestador/preguntas_grabaciones.tmp
 Estado.txt
 
 # Configuracion local de Claude Code (permisos y rutas propias de este Mac)

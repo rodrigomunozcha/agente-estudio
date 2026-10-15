@@ -7,15 +7,12 @@ por los mismos nucleos). Si un trabajo tiene varias partes de audio (una clase
 grabada en mas de un archivo), se transcriben en el orden cronologico ya
 resuelto por la etapa 2 y se concatena el texto.
 
-Antes de transcribir nada se pregunta por todas las grabaciones juntas, en
-una sola pantalla (pantalla_confirmacion.py). Eso existe porque el estudiante
-esta frente al Mac solo en los primeros segundos, por el clic que acaba de
-dar: preguntar dentro del bucle significaba interrumpirlo 20 minutos despues,
-cuando ya se habia ido.
-
-Si esa pantalla no esta compilada, se sigue por el camino anterior: un dialogo
-nativo por grabacion no reconocida (dialogo_no_reconocido.py), con las mismas
-tres salidas de siempre (solo transcribir, elegir el ramo a mano, o ignorar).
+Antes de transcribir nada se decide de que es cada grabacion (pregunta_ramo.py):
+sin preguntar si el nombre dice el ramo y la fecha, y si no, preguntandole al
+estudiante por Telegram. Una grabacion que espera respuesta queda en Input.
+Hasta el 14-10-2026 lo decidia una ventana del Mac (pantalla_confirmacion.py) o
+un dialogo por grabacion (dialogo_no_reconocido.py), que solo servian frente al
+Mac: ya no se llaman en ningun camino (issue #1).
 
 Con el ramo resuelto, el texto queda listo para que la etapa 4 (skill
 transcripciones-a-conocimiento) lo procese.
@@ -29,10 +26,9 @@ import time
 from datetime import date
 from pathlib import Path
 
-from . import cancelacion, deteccion, estado_vivo, pantalla_confirmacion, ramo_por_nombre
+from . import cancelacion, deteccion, estado_vivo, pregunta_ramo, ramo_por_nombre
 from .config import cargar_config, dir_pendientes, guardar_config
 from .deteccion import construir_trabajos, marcar_emitido
-from .dialogo_no_reconocido import preguntar_que_hacer
 from .nombres import calcular_numero_clase_por_orden, fecha_corta, slug_pendiente
 from .notificaciones import notificar_aviso, notificar_error, notificar_progreso
 from .uso import registrar_transcripcion
@@ -310,8 +306,8 @@ def _sacar_de_input(trabajo: dict, config: dict, subcarpeta: str, bitacora=None)
 
 def _aplicar_decision_de_pantalla(trabajo: dict, decision: dict, config: dict) -> str:
     """
-    Traduce lo que se eligio en la pantalla de confirmacion al estado que el
-    resto del pipeline espera. Devuelve que hacer con el trabajo: "seguir",
+    Traduce lo que se decidio (pregunta_ramo, o la decision inyectada en una
+    prueba) al estado que el resto del pipeline espera. Devuelve que hacer con el trabajo: "seguir",
     "omitir".
 
     Un ramo escrito a mano en la pantalla se guarda en config igual que si se
@@ -319,9 +315,9 @@ def _aplicar_decision_de_pantalla(trabajo: dict, decision: dict, config: dict) -
     ya se reconozca sola (ver ramo_por_nombre.py).
     """
     que_hacer = decision.get("que_hacer")
-    if que_hacer == pantalla_confirmacion.OMITIR:
+    if que_hacer == pregunta_ramo.OMITIR:
         return "omitir"
-    if que_hacer == pantalla_confirmacion.SOLO_TRANSCRIBIR:
+    if que_hacer == pregunta_ramo.SOLO_TRANSCRIBIR:
         trabajo["reconocido"] = False
         trabajo["ramo"] = None
         return "seguir"
@@ -356,18 +352,17 @@ def _aplicar_decision_de_pantalla(trabajo: dict, decision: dict, config: dict) -
 
 def procesar_pendientes(config: dict | None = None, bitacora=None, decidir=None) -> list[dict]:
     """
-    `decidir` existe para poder probar sin abrir ventanas. Por defecto es la
-    pantalla de confirmacion, que pregunta por todas las grabaciones juntas
-    antes de empezar. Si devuelve None (binario sin compilar), se sigue por el
-    dialogo de a una por vez, que es el comportamiento anterior.
+    `decidir` existe para poder probar sin escribirle a nadie. Por defecto es
+    pregunta_ramo.preguntar. Una grabacion sin decision queda en Input para la
+    proxima corrida: espera la respuesta del estudiante por Telegram.
     """
     if config is None:
         config = cargar_config()
 
     trabajos = construir_trabajos(config)
     if decidir is None:
-        decidir = pantalla_confirmacion.preguntar
-    decisiones = decidir(trabajos, config) if trabajos else {}
+        decidir = pregunta_ramo.preguntar
+    decisiones = (decidir(trabajos, config) if trabajos else {}) or {}
 
     # Marcar un trabajo como emitido escribe trabajos_emitidos.json, y detener la
     # corrida tiene que revertirlo. Si no, una grabacion cuya transcripcion se
@@ -381,36 +376,11 @@ def procesar_pendientes(config: dict | None = None, bitacora=None, decidir=None)
         # no al principio: si la transcripcion falla a mitad de camino, el
         # audio no debe quedar en el limbo marcado como "ya hecho" para
         # siempre. Asi un reintento (otro clic) lo vuelve a tomar.
-        if decisiones is not None:
-            decision = decisiones.get(trabajo["clave"])
-            if decision is None:
-                continue  # la pantalla no dijo nada de esta: queda para el proximo clic
-            if _aplicar_decision_de_pantalla(trabajo, decision, config) == "omitir":
-                continue
-        elif not trabajo["reconocido"]:
-            decision = preguntar_que_hacer(trabajo, config)
-            if decision["accion"] == "ignorar":
-                _sacar_de_input(trabajo, config, "_Ignorados", bitacora)
-                marcar_emitido(trabajo)
-                procesados.append(trabajo)
-                continue
-            if decision["accion"] == "aplicar_skills":
-                trabajo["reconocido"] = True
-                trabajo["ramo"] = decision["ramo"]
-                trabajo["perfil_whisper"] = decision["perfil_whisper"]
-                trabajo["contexto"] = decision.get("contexto", "")
-                # La formula de semana de semestre (calculada en deteccion.py
-                # asumiendo el horario y calendario actual) no tiene sentido
-                # aca: el ramo se resolvio a mano justo porque la fecha o el
-                # dia no encajaban en ese calendario (visto en vivo: daba
-                # numeros de clase sin sentido, ej. "Clase -2949"). Se cuenta
-                # por orden cronologico entre lo ya archivado de ese ramo.
-                trabajo["numero_clase"] = calcular_numero_clase_por_orden(
-                    Path(config["rutas"]["procesados"]),
-                    trabajo["ramo"],
-                    date.fromisoformat(trabajo["fecha"]),
-                )
-                trabajo["numeracion"] = "orden"
+        decision = decisiones.get(trabajo["clave"])
+        if decision is None:
+            continue  # espera la respuesta del estudiante: queda para la proxima corrida
+        if _aplicar_decision_de_pantalla(trabajo, decision, config) == "omitir":
+            continue
 
         try:
             texto = transcribir_trabajo(trabajo, config)

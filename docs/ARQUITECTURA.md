@@ -61,8 +61,11 @@ El camino de una clase:
    `sharingd`), lo mueve a `Input/` y llama a `procesar_input`, que toma el candado de
    `lock.py`.
 2. `deteccion` agrupa las grabaciones y resuelve el ramo: primero por el nombre del archivo,
-   y si no, por el día de la semana de `config.json`. `pantalla_confirmacion` muestra una
-   ventana que sigue sola a los 10 minutos.
+   y si no, por el día de la semana de `config.json`. `pregunta_ramo` decide si hace falta
+   preguntar: si el nombre dice el ramo y la fecha, no pregunta. Si no, pregunta por Telegram
+   con un botón por ramo, la grabación queda en `Input/` y el bot, al recibir el botón, anota
+   la respuesta y relanza `procesar_input --esperar`. La secretaria recuerda una vez lo que
+   sigue sin respuesta. La ventana del Mac (`pantalla_confirmacion`) ya no se llama.
 3. `transcripcion` importa `backend.transcriber` de Transcriptotem, que vive en OneDrive (ruta
    en `config.json`), y deja el texto en `orquestador/transcripciones_pendientes/`. Ese
    intermedio permite reintentar sin volver a transcribir.
