@@ -2304,6 +2304,8 @@ def probar_hoja_por_evaluacion() -> None:
         check("queda igual en OneDrive y lo avisa",
               en_onedrive.is_file() and en_onedrive.read_text(encoding="utf-8") == documento
               and hojas[-1][2:] == (2, salida, True), str(hojas))
+        check("en la carpeta de cosas creadas con Claude, separada de las clases",
+              not (semestre / "Ramo de prueba" / "Clases").exists())
 
         respuesta["cuerpo"] = "<section>segunda version</section>"
         asyncio.run(he.actualizar_tras_clase(ramo, dia(-3), config))
