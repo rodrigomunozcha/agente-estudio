@@ -61,8 +61,9 @@ UMBRAL_COINCIDENCIA = 0.60
 # largo parecido no.
 UMBRAL_PALABRA = 0.85
 
-# Mismo valor que reuniones.RAMO. No se importa de alli porque reuniones carga
-# el SDK de Claude, y este modulo corre en la deteccion, que no lo necesita.
+# Mismo valor que reuniones.RAMO y pregunta_ramo.REUNION. No se importa de
+# reuniones porque carga el SDK de Claude, ni de pregunta_ramo porque esa importa
+# este modulo.
 RAMO_REUNION = "REUNIÓN"
 PREFIJO_REUNION_ONLINE = "reunion online"
 
@@ -177,8 +178,10 @@ def resolver(nombres_archivo: list[str], config: dict) -> tuple[str, dict | None
         # La grabadora de la barra de menu nombra "Reunión Online DD.MM.YY - <tema>".
         # El tema lo escribe el estudiante y puede traer cualquier palabra, que
         # bajaria el puntaje de abajo hasta preguntar. El prefijo lo pone el
-        # programa, asi que es una marca segura y va antes que el puntaje.
-        if limpio.startswith(PREFIJO_REUNION_ONLINE) and RAMO_REUNION in conocidos:
+        # programa, asi que es una marca segura y va antes que el puntaje. No exige
+        # REUNIÓN en ramos_adicionales: pregunta_ramo ya la ofrece siempre, y un
+        # clon nuevo trae ramos_adicionales vacio (revision del 15-10-2026).
+        if limpio.startswith(PREFIJO_REUNION_ONLINE):
             resultados.append((RECONOCIDO, RAMO_REUNION))
             continue
         con_contenido = {
@@ -198,7 +201,9 @@ def resolver(nombres_archivo: list[str], config: dict) -> tuple[str, dict | None
         return NO_CALZA, None
     if reconocidos:
         ramo = reconocidos.pop()
-        return RECONOCIDO, {"nombre": ramo, "perfil_whisper": conocidos[ramo]}
+        # Sin perfil propio (REUNIÓN sin configurar), transcripcion usa el de
+        # por defecto.
+        return RECONOCIDO, {"nombre": ramo, "perfil_whisper": conocidos.get(ramo)}
     # Ninguna parte reconocio un ramo. Basta que una traiga palabras reales que
     # no calzan para que valga la pena preguntar.
     if any(estado == NO_CALZA for estado, _ in resultados):

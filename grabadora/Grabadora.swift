@@ -36,9 +36,15 @@
 //     hace que ramo_por_nombre lo reconozca como REUNIÓN sin preguntar, y el
 //     tema llega al analisis, que lo usa para titular la nota.
 //   - en modo pantalla, ademas, el video con el audio mezclado en ~/Movies/Reuniones.
-//   - las pistas sueltas quedan en la carpeta temporal del sistema, que macOS
-//     limpia sola. No se borran desde aqui: la regla es no borrar archivos del
-//     estudiante, ni siquiera desde un programa.
+//   - las pistas sueltas, en la carpeta comun "archivos para borrar", donde el
+//     estudiante las borra a mano (regla 2 del CLAUDE.md global). Al principio
+//     iban a la carpeta temporal del sistema, pero la revision de codigo del
+//     15-10-2026 noto que, si la mezcla fallaba, esa era la unica copia de la
+//     reunion, y macOS la vacia solo.
+//
+// El pipeline lo lanza el vigilante (vigilar_descargas), que mira Input. La
+// grabadora solo deja el archivo ahi. Hasta el 15-10-2026 lanzaba Python por su
+// cuenta, porque el vigilante solo miraba Descargas.
 //
 // Los demas participantes no reciben ningun aviso: Zoom, Meet y Teams solo
 // avisan cuando se usa su propio boton de grabar.
@@ -51,7 +57,14 @@ import Cocoa
 import CoreAudio
 import ScreenCaptureKit
 
-let PYTHON = "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
+// Mismo lugar que config.CARPETA_PARA_BORRAR, con la subcarpeta que dice de
+// donde viene, como las demas del agente. Swift no puede importar el modulo.
+let CARPETA_PISTAS = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Documents/Claude Code/archivos para borrar/Agente estudio - pistas de la grabadora")
+
+// Si ScreenCaptureKit no avisa que cerro el video, la reunion sigue igual
+// despues de este plazo. Ver detener().
+let SEGUNDOS_PARA_CERRAR_VIDEO: TimeInterval = 10
 
 // launchd no trae /opt/homebrew/bin en el PATH, por eso se busca a mano.
 let FFMPEG = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
@@ -62,7 +75,7 @@ let FFMPEG = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
 let SEGUNDOS_PARA_EL_TEMA: TimeInterval = 120
 
 // Al conectar unos AirPods, macOS avisa el cambio de microfono antes de que
-// esten listos para grabar. Abrirlos al tiro a veces falla.
+// esten listos para grabar. Abrirlos de inmediato a veces falla.
 let ESPERA_CAMBIO_MICROFONO: TimeInterval = 1
 // Pocos a proposito: cada intento abre el microfono de los AirPods, y eso los
 // hace cambiar de modo (pausa y salto de volumen). Con 8 intentos fallidos, el
@@ -247,8 +260,7 @@ final class Microfono {
     // ruido. Ceros exactos son un permiso negado, un dispositivo sin microfono
     // o el del Mac con la tapa cerrada. Paso en la prueba del 14-10-2026: 53 s
     // de microfono en -91 dB sin ningun aviso, con el Mac cerrado y un parlante.
-    // Se muestra en el icono y no como notificacion, a pedido del estudiante:
-    // en una reunion el aviso tiene que ser discreto.
+    // Lo usa el controlador para el icono y la notificacion (ver dibujar()).
     var sinVoz: Bool {
         motor == nil || (Date().timeIntervalSince(inicioTramo) > 5 && !oyoAlgo)
     }
@@ -290,8 +302,7 @@ final class Sesion {
         self.conPantalla = conPantalla
         let sello = DateFormatter()
         sello.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        carpeta = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Grabadora \(sello.string(from: inicio))")
+        carpeta = CARPETA_PISTAS.appendingPathComponent("Grabadora \(sello.string(from: inicio))")
         try FileManager.default.createDirectory(at: carpeta, withIntermediateDirectories: true)
         microfono = Microfono(carpeta: carpeta, inicio: inicio)
     }
@@ -338,7 +349,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
     // eso se abre un tramo nuevo.
     private func cambiarMicrofono(intento: Int) {
         guard let sesion, !sesion.microfono.nuevoTramo(), intento < INTENTOS_CAMBIO_MICROFONO else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + ESPERA_CAMBIO_MICROFONO) { [weak self] in
             self?.cambiarMicrofono(intento: intento + 1)
         }
     }
@@ -439,7 +450,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
             return
         }
         if !nueva.sistemaOK { avisar("Solo se graba tu micrófono", "Falta el permiso de Grabación de audio del sistema.") }
-        // Sin microfono no salta nada: lo muestra el icono (ver Microfono.sinVoz).
+        // Sin microfono, el aviso sale en el primer dibujar() (ver Microfono.sinVoz).
 
         nueva.sinReposo = ProcessInfo.processInfo.beginActivity(options: .idleSystemSleepDisabled,
                                                                 reason: "Grabando una reunión")
@@ -473,25 +484,36 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         sesion.sistema.detener()
         reloj?.invalidate()
         self.sesion = nil
+        avisoSinVoz = false
         dibujar()
-        if let stream = sesion.stream {
-            // El video se cierra despues, en recordingOutputDidFinishRecording.
-            pendiente = sesion
-            Task { try? await stream.stopCapture() }
-        } else {
-            terminar(sesion)
+        guard let stream = sesion.stream else { return terminar(sesion) }
+        // El video se cierra despues, en recordingOutputDidFinishRecording. Pero
+        // si la pantalla se corto a mitad de camino, o stopCapture falla, ese
+        // aviso puede no llegar nunca, y la reunion entera quedaba esperando sin
+        // mezcla ni aviso (revision de codigo del 15-10-2026). Por eso hay plazo:
+        // el audio va igual, con o sin video.
+        pendiente = sesion
+        Task { @MainActor in
+            do { try await stream.stopCapture() } catch { self.terminarPendiente() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + SEGUNDOS_PARA_CERRAR_VIDEO) { [weak self] in
+            self?.terminarPendiente()
         }
     }
 
     // La sesion que espera que ScreenCaptureKit termine de cerrar el video.
     private var pendiente: Sesion?
 
+    // Lo pueden llamar el aviso de video cerrado, el error de stopCapture y el
+    // plazo. Solo el primero hace algo.
+    private func terminarPendiente() {
+        guard let sesion = pendiente else { return }
+        pendiente = nil
+        terminar(sesion)
+    }
+
     func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
-        DispatchQueue.main.async {
-            guard let sesion = self.pendiente else { return }
-            self.pendiente = nil
-            self.terminar(sesion)
-        }
+        DispatchQueue.main.async { self.terminarPendiente() }
     }
 
     func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
@@ -545,9 +567,13 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         return destino
     }
 
+    private func pistasGuardadas(_ sesion: Sesion) -> String {
+        "Las pistas quedaron en \(sesion.carpeta.path). Son la única copia de la reunión: no las borres."
+    }
+
     private func entregar(_ sesion: Sesion, tema: String) {
         guard let ffmpeg = FFMPEG else {
-            avisar("Falta ffmpeg", "Las pistas quedaron en \(sesion.carpeta.path). Instálalo con: brew install ffmpeg")
+            avisar("Falta ffmpeg", "Instálalo con: brew install ffmpeg. " + pistasGuardadas(sesion))
             return
         }
         // La carpeta Input sale de config.json, igual que para el pipeline: una
@@ -555,7 +581,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         let config = (try? Data(contentsOf: raiz.appendingPathComponent("orquestador/config.json")))
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         guard let rutaInput = (config?["rutas"] as? [String: Any])?["input"] as? String else {
-            avisar("No encontré la carpeta Input", "Revisa orquestador/config.json. Las pistas quedaron en \(sesion.carpeta.path).")
+            avisar("No encontré la carpeta Input", "Revisa orquestador/config.json. " + pistasGuardadas(sesion))
             return
         }
         let input = URL(fileURLWithPath: rutaInput)
@@ -607,7 +633,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         guard correr(ffmpeg, ["-y"] + entradas + ["-filter_complex", mezcla, "-map", "[a]",
                                                    "-ac", "1", "-c:a", "aac", "-b:a", "96k", "-f", "ipod", parcial.path]),
               (try? FileManager.default.moveItem(at: parcial, to: destino)) != nil else {
-            avisar("No se pudo mezclar el audio", "Las pistas quedaron en \(sesion.carpeta.path).")
+            avisar("No se pudo mezclar el audio", pistasGuardadas(sesion))
             return
         }
 
@@ -624,15 +650,8 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
             }
         }
 
-        avisar("Reunión grabada", "Empieza el procesamiento. Te aviso cuando estén las notas.")
-        // Lo mismo que hace vigilar_descargas al recibir un AirDrop: espera si
-        // ya hay una corrida y despues procesa Input.
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: PYTHON)
-        p.arguments = ["-c", "from orquestador import lock, procesar_input; "
-                           + "lock.liberar(lock.adquirir_bloqueante()); procesar_input.main()"]
-        p.currentDirectoryURL = raiz
-        try? p.run()
+        // El vigilante ve el archivo nuevo en Input y lanza el procesamiento.
+        avisar("Reunión grabada", "Quedó en Input y se procesa sola. Te aviso cuando estén las notas.")
     }
 }
 

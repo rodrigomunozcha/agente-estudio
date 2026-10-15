@@ -51,4 +51,9 @@ launchctl bootout "gui/$(id -u)/$ETIQUETA" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENTES/$ETIQUETA.plist"
 
 echo "Listo. Arriba a la derecha quedó un círculo: clic para grabar una reunión."
-echo "La primera vez macOS te pide permiso de Grabación de pantalla y de Micrófono."
+echo "La primera vez macOS te pide permiso de Micrófono y de Grabación de audio del"
+echo "sistema. El de Grabación de pantalla solo lo pide el modo pantalla y audio."
+echo
+echo "La reunión grabada queda en Input y la procesa el vigilante. Si lo instalaste"
+echo "antes del 15-10-2026, reinstálalo para que también mire Input:"
+echo "  bash launchd/instalar_vigilante.sh"

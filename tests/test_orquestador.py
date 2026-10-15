@@ -213,8 +213,8 @@ def probar_el_nombre_del_archivo_manda_sobre_el_dia() -> None:
           f"dio {estado} / {info}")
 
     # Lo que deja la grabadora de la barra de menu: el tema lo escribe el
-    # estudiante y no puede hacer que se pregunte. Sin REUNIÓN configurado, el
-    # prefijo no inventa un ramo.
+    # estudiante y no puede hacer que se pregunte. Vale aunque REUNIÓN no este
+    # en ramos_adicionales, como en un clon nuevo.
     con_reunion = dict(config, ramos_adicionales={"REUNIÓN": {"perfil_whisper": "es-chile"}})
     for nombre in ["Reunión Online 14.10.26.m4a",
                    "Reunión Online 14.10.26 - Termodinámica con el grupo.m4a",
@@ -222,9 +222,10 @@ def probar_el_nombre_del_archivo_manda_sobre_el_dia() -> None:
         estado, info = rpn.resolver([nombre], con_reunion)
         check(f"'{nombre[:34]}' -> REUNIÓN",
               estado == rpn.RECONOCIDO and info["nombre"] == "REUNIÓN", f"dio {estado} / {info}")
-    estado, _ = rpn.resolver(["Reunión Online 14.10.26 - avance.m4a"], config)
-    check("sin REUNIÓN en la configuracion, el prefijo no reconoce nada",
-          estado != rpn.RECONOCIDO, f"dio {estado}")
+    estado, info = rpn.resolver(["Reunión Online 14.10.26 - avance.m4a"], config)
+    check("sin REUNIÓN en la configuracion, el prefijo igual da REUNIÓN, con el perfil por defecto",
+          estado == rpn.RECONOCIDO and info == {"nombre": "REUNIÓN", "perfil_whisper": None},
+          f"dio {estado} / {info}")
 
     # Partes de ramos distintos agrupadas: ya fusiono dos clases una vez.
     estado, _ = rpn.resolver(
