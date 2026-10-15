@@ -3574,6 +3574,67 @@ def probar_pregunta_de_ramo_por_telegram() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_ramo_propuesto_por_la_hora() -> None:
+    """
+    Si el nombre no dice el ramo, la hora en que empezo la grabacion se cruza con el
+    horario: si cae en una clase, se propone ese ramo con un primer boton para
+    confirmarlo. Si a esa hora no habia clase, la pregunta es la general. Nada se
+    procesa antes de la respuesta. Telegram y la hora del audio son falsos.
+    """
+    print("\n== el ramo se propone por la hora de grabacion ==")
+    import json
+    from datetime import datetime as _dt
+
+    from orquestador import pregunta_ramo as pr
+
+    base = Path(tempfile.mkdtemp(prefix="ramo_hora_"))
+    config = {"ramos": {"lunes": {"nombre": "MICROECONOMIA AVANZADA", "inicio": "19:00", "fin": "22:00"},
+                        "martes": {"nombre": "FINANZAS CORPORATIVAS", "inicio": "19:00", "fin": "22:00"}},
+              "ramos_adicionales": {"REUNIÓN": {}}}
+    horas = {}
+    avisos = []
+    originales = (pr.RUTA, pr.telegram.avisar, pr.deteccion.momento_de_grabacion)
+    pr.RUTA = base / "preguntas.json"
+    pr.telegram.avisar = lambda texto, adjunto=None, teclado=None: avisos.append((texto, teclado)) or True
+    pr.deteccion.momento_de_grabacion = lambda ruta: horas.get(Path(ruta).name)
+
+    def trabajo(nombre, fecha, momento):
+        horas[nombre] = momento
+        return {"clave": f"{fecha}|{nombre}", "fecha": fecha, "archivos": [str(base / nombre)],
+                "reconocido": True, "ramo": "MICROECONOMIA AVANZADA"}
+
+    def textos(teclado):
+        return [x["text"] for fila in teclado["inline_keyboard"] for x in fila]
+
+    try:
+        check("una grabación que empieza a las 18:40 de un lunes es de la clase del lunes",
+              pr.ramo_por_horario(_dt(2026, 10, 5, 18, 40), config) == "MICROECONOMIA AVANZADA")
+        check("una de las 13:00 no es de ninguna clase", pr.ramo_por_horario(_dt(2026, 10, 5, 13, 0), config) is None)
+
+        decisiones = pr.preguntar([trabajo("Grabación nueva 1.m4a", "2026-10-06", _dt(2026, 10, 6, 19, 10))], config)
+        texto, teclado = avisos[-1]
+        check("si la hora cae en una clase, propone ese ramo con un primer botón para confirmarlo",
+              "Empezó durante tu clase de Finanzas Corporativas" in texto
+              and textos(teclado)[0] == "✅ Sí, es de Finanzas Corporativas"
+              and textos(teclado)[1:] == ["Microeconomia Avanzada", "Reunión", "No es una clase"], str(textos(teclado)))
+        check("y no la procesa antes de la respuesta", decisiones == {})
+        id_ = json.loads(pr.RUTA.read_text())["2026-10-06|Grabación nueva 1.m4a"]["id"]
+        dato = teclado["inline_keyboard"][0][0]["callback_data"]
+        check("el botón de confirmar responde ese ramo",
+              pr.responder(id_, int(dato.split(":")[2]))["respuesta"] == {"que_hacer": "procesar", "ramo": "FINANZAS CORPORATIVAS"})
+
+        pr.preguntar([trabajo("Grabación nueva 2.m4a", "2026-10-05", _dt(2026, 10, 5, 13, 0))], config)
+        texto, teclado = avisos[-1]
+        check("si a esa hora no había clase, la pregunta es la general, sin sugerir el ramo del día",
+              "👉" not in texto and textos(teclado)[0] == "Microeconomia Avanzada", texto)
+
+        pr.preguntar([trabajo("Entrevista con la empresa.m4a", "2026-10-05", _dt(2026, 10, 5, 19, 30))], config)
+        check("un nombre que dice otra cosa no se propone como clase, aunque la hora calce", "👉" not in avisos[-1][0])
+    finally:
+        pr.RUTA, pr.telegram.avisar, pr.deteccion.momento_de_grabacion = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def probar_enlace_de_calendario() -> None:
     """
     Un evento que sale de una reunion se ofrece con un boton que abre Google

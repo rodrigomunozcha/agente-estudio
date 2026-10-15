@@ -10,7 +10,10 @@ preguntarse (issue #1). Ahora la ventana no aparece en ningun camino.
 Las reglas, en orden:
   1. El nombre de todos los archivos dice el ramo (ramo_por_nombre) y la fecha: se
      procesa sin preguntar.
-  2. Cualquier otra duda se pregunta por Telegram, con un boton por ramo, Reunion y
+  2. El nombre no dice nada: la hora en que empezo a grabarse (la que trae el audio) se
+     cruza con el horario. Si cae en una clase, se propone ese ramo, con un primer boton
+     para confirmarlo.
+  3. Cualquier otra duda se pregunta por Telegram, con un boton por ramo, Reunion y
      No es una clase. Si el dia de la semana sugiere un ramo, el mensaje lo dice.
 La grabacion con duda no se procesa a ciegas: queda en Input hasta la respuesta. La
 secretaria la recuerda una vez a las 9:00 (recordar), y nunca se decide sola.
@@ -49,6 +52,9 @@ SEGUNDOS_CANDADO = 10
 # asi que una pregunta de anoche se recuerda en la manana y una de las 8:50, al dia
 # siguiente.
 RECORDAR_TRAS = timedelta(hours=3)
+# Una grabacion que empieza hasta media hora antes de la clase es de esa clase: se
+# prende el telefono al llegar a la sala.
+MARGEN_ANTES = timedelta(minutes=30)
 
 _MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
           "septiembre", "octubre", "noviembre", "diciembre"]
@@ -118,25 +124,59 @@ def _cuando(trabajo: dict) -> str:
     return texto + (f", empezó a las {momento:%H:%M}" if momento and momento.date() == d.date() else "")
 
 
-def _sugerencia(trabajo: dict) -> str | None:
-    """El ramo que sugiere lo que se sabe de la grabacion, para decirlo en la pregunta.
-    Hoy es el dia de la semana segun el horario (deteccion)."""
-    return trabajo.get("ramo") if trabajo.get("reconocido") else None
+def ramo_por_horario(momento: datetime, config: dict) -> str | None:
+    """El ramo cuya clase estaba en curso cuando empezo la grabacion, segun el horario
+    de config.json (desde MARGEN_ANTES antes del inicio hasta el fin). None si a esa
+    hora no habia clase."""
+    dia = deteccion.NOMBRES_DIA[momento.weekday()]
+    info = (config.get("ramos") or {}).get(dia) or {}
+    try:
+        inicio = datetime.combine(momento.date(), datetime.strptime(info["inicio"], "%H:%M").time())
+        fin = datetime.combine(momento.date(), datetime.strptime(info["fin"], "%H:%M").time())
+    except (KeyError, ValueError, TypeError):
+        return None
+    return info.get("nombre") if inicio - MARGEN_ANTES <= momento <= fin else None
+
+
+def _sugerencia(trabajo: dict, config: dict) -> tuple[str | None, str | None]:
+    """(ramo sugerido, por que). Solo para un nombre que no dice nada: uno con palabras
+    que no calzan con ningun ramo es senal de que no es una clase. Con la hora de
+    grabacion, manda el horario, y si a esa hora no habia clase no se sugiere nada: una
+    grabacion de las 13:00 de un lunes no es la clase del lunes en la noche. Sin hora,
+    queda el dia de la semana."""
+    estado, _ = ramo_por_nombre.resolver([Path(a).name for a in trabajo["archivos"]], config)
+    if estado != ramo_por_nombre.SIN_SENAL:
+        return None, None
+    momento = deteccion.momento_de_grabacion(Path(trabajo["archivos"][0]))
+    if momento is not None and momento.date().isoformat() == trabajo["fecha"]:
+        ramo = ramo_por_horario(momento, config)
+        return (ramo, "hora") if ramo else (None, None)
+    return (trabajo.get("ramo"), "dia") if trabajo.get("reconocido") else (None, None)
 
 
 def _texto_pregunta(p: dict, recordatorio: bool = False) -> str:
     cabeza = ("⏰ Sigue esperando tu respuesta: ¿de qué es esta grabación?" if recordatorio
               else "🎙️ ¿De qué es esta grabación?")
     lineas = [cabeza, f"📅 {p['cuando']}", f"🗂️ {', '.join(Path(a).name for a in p['archivos'])}"]
-    if p.get("sugerido"):
+    if p.get("sugerido") and p.get("por") == "hora":
+        lineas.append(f"👉 Empezó durante tu clase de {ramo_legible(p['sugerido'])}. ¿Es de esa clase?")
+    elif p.get("sugerido"):
         lineas.append(f"👉 Por el día, parece de {ramo_legible(p['sugerido'])}")
     lineas.append("⏸️ La dejo sin procesar hasta que me digas.")
     return "\n".join(lineas)
 
 
 def _botones(p: dict) -> dict:
+    """Un boton por opcion. Con un ramo propuesto por la hora, el primero lo confirma y
+    el resto queda abajo, por si es otra cosa."""
     nombres = [("Reunión" if r == REUNION else ramo_legible(r)) for r in p["opciones"]] + [NO_ES_CLASE]
-    return telegram.botones([(n, f"grab:{p['id']}:{i}") for i, n in enumerate(nombres)])
+    botones = [(n, f"grab:{p['id']}:{i}") for i, n in enumerate(nombres)]
+    if p.get("por") == "hora" and p.get("sugerido") in p["opciones"]:
+        i = p["opciones"].index(p["sugerido"])
+        primero = (f"✅ Sí, es de {nombres[i]}", botones[i][1])
+        return {"inline_keyboard": [[{"text": primero[0], "callback_data": primero[1]}]]
+                + telegram.botones([x for j, x in enumerate(botones) if j != i])["inline_keyboard"]}
+    return telegram.botones(botones)
 
 
 def preguntar(trabajos: list[dict], config: dict) -> dict[str, dict]:
@@ -159,9 +199,10 @@ def preguntar(trabajos: list[dict], config: dict) -> dict[str, dict]:
         if p and p.get("respuesta"):
             decisiones[t["clave"]] = dict(p["respuesta"])
         elif p is None:
+            sugerido, por = _sugerencia(t, config)
             nuevas.append({"id": hashlib.sha1(t["clave"].encode()).hexdigest()[:10], "clave": t["clave"],
                            "fecha": t["fecha"], "cuando": _cuando(t), "archivos": t["archivos"],
-                           "sugerido": _sugerencia(t), "opciones": opciones(config)})
+                           "sugerido": sugerido, "por": por, "opciones": opciones(config)})
     enviadas = []
     for p in nuevas:
         # Sin token, sin chat o sin red, avisar devuelve False y no se anota: la
