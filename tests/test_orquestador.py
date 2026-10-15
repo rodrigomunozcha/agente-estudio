@@ -3096,6 +3096,87 @@ def probar_reuniones() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_seguimientos_de_reuniones() -> None:
+    """
+    El dia que vence una promesa de una reunion, la secretaria pregunta si se
+    cumplio, con Si (cierra), No (pospone una semana) y Descartar. Los botones los
+    atiende el bot, que es otro proceso. Telegram y el archivo son falsos.
+    """
+    print("\n== seguimientos de las reuniones ==")
+    from datetime import timedelta
+
+    from orquestador import bot as b
+    from orquestador import evaluaciones as ev
+    from orquestador import secretaria as se
+
+    base = Path(tempfile.mkdtemp(prefix="seguimientos_"))
+    enviados, cambios = [], []
+    tg = b.telegram
+    originales = (tg.enviar, tg.responder_boton, tg.cambiar_botones, ev.RUTA, b.RUTA_ESTADO, b.cargar_config)
+    tg.enviar = lambda texto, chat_id=None, teclado=None: enviados.append((texto, teclado)) or {"message_id": len(enviados)}
+    tg.responder_boton = lambda *a: None
+    tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
+    ev.RUTA, b.RUTA_ESTADO, b.cargar_config = base / "evaluaciones.json", base / "estado.json", (lambda: {})
+    ev.guardar({"ramos": {}, "pendientes": []})
+    hoy = date(2036, 10, 6)
+
+    def tocar(dato, mid):
+        b.atender({"callback_query": {"id": "x", "data": dato,
+                                      "message": {"chat": {"id": 1}, "message_id": mid}}}, 1)
+
+    def pendiente(que):
+        return next(p for p in ev.cargar()["pendientes"] if p["que"] == que)
+
+    try:
+        for que, fecha in (("Avisar el resultado (la empresa)", "2036-10-06"),
+                           ("Mandar el contrato (la empresa)", "2036-10-04"),
+                           ("Llamar de vuelta (la empresa)", "2036-10-20")):
+            ev.anotar_pendiente("REUNIÓN", fecha, que, "reunion", clase="2036-09-29",
+                                reunion="Entrevista de práctica", tipo="seguimiento")
+        ev.anotar_pendiente("REUNIÓN", "2036-10-06", "Mandar el CV", "reunion", clase="2036-09-29",
+                            reunion="Entrevista de práctica")
+        preguntas = se.seguimientos(ev.cargar(), hoy)
+        check("pregunta por lo que vence hoy y por lo vencido sin respuesta, no por lo que viene",
+              [t.split("\n")[1] for t, _ in preguntas]
+              == ["• Mandar el contrato (la empresa)", "• Avisar el resultado (la empresa)"], str(preguntas))
+        botones = [x["text"] for fila in preguntas[0][1]["inline_keyboard"] for x in fila]
+        check("con los botones Sí, No y Descartar", botones == ["Sí", "No, pospón 1 semana", "Descartar"], str(botones))
+        texto, _ = se.resumen(hoy, ev.cargar(), {"rutas": {"output": str(base)}})
+        check("y no repite el seguimiento como tarea para hoy, pero si la accion",
+              "Avisar el resultado" not in (texto or "") and "Mandar el CV" in (texto or ""), str(texto))
+
+        datos_boton = lambda i, k: preguntas[i][1]["inline_keyboard"][0][k]["callback_data"]
+        tocar(datos_boton(1, 0), 10)
+        check("Sí cierra el seguimiento y le quita los botones al mensaje",
+              pendiente("Avisar el resultado (la empresa)")["estado"] == "hecho"
+              and cambios[-1] == (10, None) and "Cerrado" in enviados[-1][0], str(enviados[-1:]))
+        tocar(datos_boton(0, 1), 11)
+        check("No lo pospone una semana",
+              pendiente("Mandar el contrato (la empresa)")["fecha"] == "2036-10-11"
+              and "Lo pospongo" in enviados[-1][0], str(enviados[-1:]))
+        tocar(datos_boton(0, 2), 11)
+        check("un botón viejo de un seguimiento ya pospuesto no hace nada",
+              "ya no está abierto" in enviados[-1][0] and "estado" not in pendiente("Mandar el contrato (la empresa)"))
+        ev.anotar_pendiente("REUNIÓN", "2036-10-01", "Confirmar la fecha (la empresa)", "reunion",
+                            clase="2036-09-29", tipo="seguimiento")
+        vencido = ev.resolver_seguimiento(ev.clave_pendiente(pendiente("Confirmar la fecha (la empresa)")), "no",
+                                          hoy=date(2036, 10, 9))
+        check("uno que venció hace días se pospone una semana desde hoy, no desde su fecha",
+              vencido["fecha"] == (date(2036, 10, 9) + timedelta(days=7)).isoformat(), str(vencido))
+        p = pendiente("Llamar de vuelta (la empresa)")
+        tocar(f"seg:x:{ev.clave_pendiente(p)}", 12)
+        check("Descartar lo saca de la vista sin borrarlo",
+              pendiente("Llamar de vuelta (la empresa)")["estado"] == "descartado"
+              and "Llamar de vuelta" not in se.lista_pendientes(ev.cargar(), hoy))
+        textos = " ".join(t for t, _ in se.seguimientos(ev.cargar(), date(2036, 10, 30)))
+        check("y la secretaria ya no pregunta por lo cerrado ni por lo descartado",
+              "Avisar el resultado" not in textos and "Llamar de vuelta" not in textos
+              and "Mandar el contrato" in textos, textos)
+    finally:
+        tg.enviar, tg.responder_boton, tg.cambiar_botones, ev.RUTA, b.RUTA_ESTADO, b.cargar_config = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def probar_enlace_de_calendario() -> None:
     """
     Un evento que sale de una reunion se ofrece con un boton que abre Google

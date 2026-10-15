@@ -519,10 +519,15 @@ def atender_comando(comando: str, estado: dict, config: dict) -> None:
         _guardar_estado(estado)
         telegram.enviar("🧹 Listo, empezamos de cero. No recuerdo lo que hablamos antes.")
     elif comando == "hoy":
-        texto, hojas = secretaria.resumen(date.today(), evaluaciones.cargar(), config)
-        telegram.enviar(texto or "🙌 Hoy no hay nada pendiente ni evaluaciones en los próximos 7 días.")
+        datos = evaluaciones.cargar()
+        texto, hojas = secretaria.resumen(date.today(), datos, config)
+        seguimientos = secretaria.seguimientos(datos, date.today())
+        if texto or not seguimientos:
+            telegram.enviar(texto or "🙌 Hoy no hay nada pendiente ni evaluaciones en los próximos 7 días.")
         for hoja in hojas:
             telegram.enviar_documento(hoja, hoja.stem)
+        for texto_seg, botones in seguimientos:
+            telegram.enviar(texto_seg, teclado=botones)
     elif comando == "pendientes":
         telegram.enviar(secretaria.lista_pendientes(evaluaciones.cargar(), date.today()))
     elif comando == "evaluaciones":
@@ -551,6 +556,8 @@ def atender_boton(cb: dict, estado: dict, config: dict) -> None:
                         else "👌 Listo, no anoté nada.")
     elif dato in ("voto:+", "voto:-"):
         votar(mensaje, dato[-1], estado)
+    elif dato.startswith("seg:"):
+        responder_seguimiento(dato, mensaje)
     elif dato.startswith("ramo:") and pendiente.get("tipo") == "archivo":
         ramos = ramos_con_carpeta(config)
         i = int(dato[5:])
@@ -565,6 +572,28 @@ def atender_boton(cb: dict, estado: dict, config: dict) -> None:
             enviar_hoja(ramos[i], config)
     else:
         telegram.enviar("⌛ Ese botón ya no está vigente.")
+
+
+def responder_seguimiento(dato: str, mensaje: int | None) -> None:
+    """Los botones de "¿Cumplieron?" que manda la secretaria (secretaria.seguimientos)."""
+    _, respuesta, clave = (dato.split(":") + ["", ""])[:3]
+    respuesta = {"si": "si", "no": "no", "x": "descartar"}.get(respuesta)
+    try:
+        p = evaluaciones.resolver_seguimiento(clave, respuesta) if respuesta else None
+    except evaluaciones.CandadoOcupado:
+        telegram.enviar("⏳ No pude anotarlo: justo se estaba guardando otra cosa. Tócalo de nuevo en un momento.")
+        return
+    if p is None:
+        telegram.enviar("⌛ Ese seguimiento ya no está abierto.")
+        return
+    if mensaje:
+        telegram.cambiar_botones(mensaje, None)
+    if respuesta == "si":
+        telegram.enviar(f"✅ Cerrado: {p['que']}.")
+    elif respuesta == "no":
+        telegram.enviar(f"📆 Lo pospongo: te vuelvo a preguntar el {secretaria._fecha(p['fecha'])}.")
+    else:
+        telegram.enviar("🗑️ Descartado. No te lo vuelvo a preguntar.")
 
 
 def atender(actualizacion: dict, chat: int) -> None:

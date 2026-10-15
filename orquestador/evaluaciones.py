@@ -32,6 +32,7 @@ Formato: {"ramos": {"<RAMO como en config.json>": [evaluacion, ...]},
 acumula y fuente. Las evaluaciones de un ramo van en orden cronologico.
 """
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -165,8 +166,37 @@ def marcar_hecho(ramo: str, que: str, fecha: str | None = None, ensayo: bool = F
 
 
 def pendientes_activos(datos: dict) -> list[dict]:
-    """Los pendientes que faltan por hacer. Los antiguos no traen estado: faltan."""
-    return [p for p in datos.get("pendientes", []) if p.get("estado") != "hecho"]
+    """Los pendientes que faltan por hacer. Los antiguos no traen estado: faltan. Un
+    seguimiento descartado tampoco se muestra."""
+    return [p for p in datos.get("pendientes", []) if p.get("estado") not in ("hecho", "descartado")]
+
+
+def clave_pendiente(p: dict) -> str:
+    """Identifica un pendiente en el dato de un boton de Telegram, que admite 64 bytes.
+    Cambia si cambia la fecha: los botones de un seguimiento pospuesto dejan de servir."""
+    return hashlib.sha1(f"{p.get('ramo')}|{p.get('fecha')}|{p.get('que')}".encode()).hexdigest()[:10]
+
+
+POSPONER_DIAS = 7
+
+
+def resolver_seguimiento(clave: str, respuesta: str, hoy: date | None = None, ensayo: bool = False) -> dict | None:
+    """Lo que el estudiante contesto a "¿cumplieron?": "si" lo cierra, "no" lo pospone
+    una semana desde hoy y "descartar" lo saca de la vista sin borrarlo. Devuelve el
+    seguimiento como quedo, o None si ya no hay uno abierto con esa clave."""
+    hoy = (hoy or date.today()).isoformat()
+    with _modificando(ensayo=ensayo) as datos:
+        p = next((x for x in pendientes_activos(datos)
+                  if x.get("tipo") == "seguimiento" and clave_pendiente(x) == clave), None)
+        if p is not None:
+            if respuesta == "si":
+                p["estado"] = "hecho"
+            elif respuesta == "no":
+                p["fecha"] = (date.fromisoformat(max(p["fecha"], hoy)) + timedelta(days=POSPONER_DIAS)).isoformat()
+            else:
+                p["estado"] = "descartado"
+            p = dict(p)
+    return p
 
 
 def fijar_fecha_desde_chat(ramo: str, evaluacion: str, fecha: str, ensayo: bool = False) -> None:
