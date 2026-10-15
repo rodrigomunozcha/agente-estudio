@@ -256,6 +256,20 @@ def probar_el_nombre_del_archivo_manda_sobre_el_dia() -> None:
           estado == rpn.RECONOCIDO and info["nombre"].startswith("EIC"),
           f"dio {estado} / {info}")
 
+    # Lo que deja la grabadora de la barra de menu: el tema lo escribe el
+    # estudiante y no puede hacer que se pregunte. Sin REUNIÓN configurado, el
+    # prefijo no inventa un ramo.
+    con_reunion = dict(config, ramos_adicionales={"REUNIÓN": {"perfil_whisper": "es-chile"}})
+    for nombre in ["Reunión Online 14.10.26.m4a",
+                   "Reunión Online 14.10.26 - Termodinámica con el grupo.m4a",
+                   "Reunión Online 14.10.26 - entrega final (2).m4a"]:
+        estado, info = rpn.resolver([nombre], con_reunion)
+        check(f"'{nombre[:34]}' -> REUNIÓN",
+              estado == rpn.RECONOCIDO and info["nombre"] == "REUNIÓN", f"dio {estado} / {info}")
+    estado, _ = rpn.resolver(["Reunión Online 14.10.26 - avance.m4a"], config)
+    check("sin REUNIÓN en la configuracion, el prefijo no reconoce nada",
+          estado != rpn.RECONOCIDO, f"dio {estado}")
+
     # Partes de ramos distintos agrupadas: ya fusiono dos clases una vez.
     estado, _ = rpn.resolver(
         ["Biología celular 19.08.26.m4a", "Termodinámica 20.08.26.m4a"], config)
@@ -3321,14 +3335,19 @@ def probar_pre_commit_frena_rutas_del_mac() -> None:
 
     hook = RAIZ / ".githooks" / "pre-commit"
     tmp = Path(tempfile.mkdtemp(prefix="repo_falso_"))
+    # Sin las variables GIT_* del entorno: cuando esta prueba corre dentro del
+    # propio pre-commit, git exporta GIT_INDEX_FILE, y en un worktree esa ruta es
+    # absoluta. El repo falso escribia en el indice del repo real y el commit se
+    # detenia con "fallan las pruebas" (15-10-2026).
+    sin_git = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
-        sp.run(["git", "init", "-q"], cwd=tmp, check=True)
+        sp.run(["git", "init", "-q"], cwd=tmp, check=True, env=sin_git)
 
         def commit_con(texto: str) -> sp.CompletedProcess:
             (tmp / "nota.md").write_text(texto)
-            sp.run(["git", "add", "nota.md"], cwd=tmp, check=True)
+            sp.run(["git", "add", "nota.md"], cwd=tmp, check=True, env=sin_git)
             return sp.run(["bash", str(hook)], cwd=tmp, capture_output=True, text=True,
-                          stdin=sp.DEVNULL, env={**os.environ, "CONFIRMO_COMMIT": "1"})
+                          stdin=sp.DEVNULL, env={**sin_git, "CONFIRMO_COMMIT": "1"})
 
         # La ruta se arma por partes para que este mismo archivo no frene su commit.
         ruta = "/Users" + "/alguien"

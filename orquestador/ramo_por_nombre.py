@@ -61,6 +61,11 @@ UMBRAL_COINCIDENCIA = 0.60
 # largo parecido no.
 UMBRAL_PALABRA = 0.85
 
+# Mismo valor que reuniones.RAMO. No se importa de alli porque reuniones carga
+# el SDK de Claude, y este modulo corre en la deteccion, que no lo necesita.
+RAMO_REUNION = "REUNIÓN"
+PREFIJO_REUNION_ONLINE = "reunion online"
+
 RECONOCIDO = "reconocido"
 SIN_SENAL = "sin_senal"
 NO_CALZA = "no_calza"
@@ -169,6 +174,13 @@ def resolver(nombres_archivo: list[str], config: dict) -> tuple[str, dict | None
     resultados = []
     for nombre in nombres_archivo:
         limpio = limpiar_nombre_archivo(Path(nombre).name)
+        # La grabadora de la barra de menu nombra "Reunión Online DD.MM.YY - <tema>".
+        # El tema lo escribe el estudiante y puede traer cualquier palabra, que
+        # bajaria el puntaje de abajo hasta preguntar. El prefijo lo pone el
+        # programa, asi que es una marca segura y va antes que el puntaje.
+        if limpio.startswith(PREFIJO_REUNION_ONLINE) and RAMO_REUNION in conocidos:
+            resultados.append((RECONOCIDO, RAMO_REUNION))
+            continue
         con_contenido = {
             p for p in _palabras_utiles(limpio) if p not in PALABRAS_SIN_CONTENIDO
         }

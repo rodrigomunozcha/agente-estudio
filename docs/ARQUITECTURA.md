@@ -52,6 +52,11 @@ Tres LaunchAgents corren solos. Los instalan `launchd/instalar_vigilante.sh` y
 | `local.agente-estudio.airdrop` | `vigilar_descargas` | Cuando llega un audio por AirDrop a Descargas, y cada 10 minutos |
 | `local.agente-estudio.bot` | `bot` | Siempre, esperando mensajes de Telegram |
 | `local.agente-estudio.secretaria` | `secretaria` | Todos los días a las 9:00. Si no hay nada que decir, no escribe |
+| `local.agente-estudio.grabadora` | `grabadora/Grabadora.app` | Siempre, como botón en la barra de menú para grabar reuniones on-line |
+
+La grabadora (`grabadora/Grabadora.swift`) graba el audio del sistema y el micrófono con
+ScreenCaptureKit, deja `Reunión DD.MM.YY.m4a` en Input y llama a `procesar_input` igual que
+`vigilar_descargas`. Se instala con `bash launchd/instalar_grabadora.sh` después de compilar.
 
 El camino de una clase:
 

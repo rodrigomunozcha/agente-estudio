@@ -30,8 +30,42 @@ if command -v swiftc >/dev/null 2>&1; then
   swiftc -O -o ../barra_menu/BarraEstado ../barra_menu/BarraEstado.swift
   echo "Compilando la ventana de confirmacion..."
   swiftc -O -o ../ventana_confirmacion/ConfirmarGrabaciones ../ventana_confirmacion/ConfirmarGrabaciones.swift
+
+  # La grabadora va dentro de un .app y no como binario suelto: macOS niega el
+  # microfono a un programa sin Info.plist que explique para que lo usa, y los
+  # permisos de microfono y pantalla se recuerdan por el identificador del
+  # bundle. La firma es ad hoc (-s -), sin cuenta de desarrollador. Por eso,
+  # al recompilar, macOS puede volver a pedir los permisos una vez.
+  echo "Compilando la grabadora de reuniones..."
+  APP=../grabadora/Grabadora.app
+  mkdir -p "$APP/Contents/MacOS"
+  swiftc -O -o "$APP/Contents/MacOS/Grabadora" ../grabadora/Grabadora.swift
+  cat > "$APP/Contents/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>local.agente-estudio.grabadora</string>
+	<key>CFBundleName</key>
+	<string>Grabadora</string>
+	<key>CFBundleExecutable</key>
+	<string>Grabadora</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Para grabar tu voz junto con la reunión y procesarla como apuntes.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Para grabar lo que dicen los demás en la reunión y procesarlo como apuntes.</string>
+</dict>
+</plist>
+EOF
+  codesign --force -s - "$APP"
   ICONO="  - barra_menu/BarraEstado            (icono de progreso en la barra superior)
-  - ventana_confirmacion/ConfirmarGrabaciones  (pantalla que confirma el ramo antes de empezar)"
+  - ventana_confirmacion/ConfirmarGrabaciones  (pantalla que confirma el ramo antes de empezar)
+  - grabadora/Grabadora.app           (boton para grabar reuniones on-line)"
 else
   echo "Aviso: swiftc no esta disponible, se omiten el icono de la barra de menu"
   echo "       y la ventana de confirmacion. El sistema funciona igual: sin la"
