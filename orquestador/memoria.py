@@ -67,8 +67,11 @@ def _nfc(texto: str) -> str:
     return unicodedata.normalize("NFC", texto)
 
 
-def revisar(recuerdo: dict) -> dict:
-    """El recuerdo limpio, o RecuerdoInvalido. No escribe nada."""
+def revisar(recuerdo: dict, boveda: str | Path | None = None) -> dict:
+    """El recuerdo limpio, o RecuerdoInvalido. No escribe nada. Con la boveda, tambien
+    rechaza un nombre que ya es de una nota fuera de la wiki: guardar_recuerdo no la
+    tocaria, y el boton se ofreceria para fallar despues. Es un seguro: el perfil enlaza
+    notas por su nombre, y el modelo tiende a reusar esos nombres al proponer la pagina."""
     if not isinstance(recuerdo, dict):
         raise RecuerdoInvalido("no es un recuerdo")
     tipo = recuerdo.get("tipo")
@@ -86,6 +89,10 @@ def revisar(recuerdo: dict) -> dict:
         raise RecuerdoInvalido("trae un dato sensible (correo, RUT, teléfono o un número de cuenta)")
     fuente = recuerdo.get("fuente")
     fuente = " ".join(_PROHIBIDOS_EN_NOMBRE.sub(" ", _nfc(fuente)).split()) if isinstance(fuente, str) else ""
+    if boveda is not None:
+        existente = _buscar_nota(Path(boveda), pagina)
+        if existente is not None and Path(boveda) / CARPETA_WIKI not in existente.parents:
+            raise RecuerdoInvalido(f"ya hay una nota «{pagina}» fuera de la wiki, y esas no se editan")
     return {"pagina": pagina, "tipo": tipo, "texto": texto, "fuente": fuente or None}
 
 

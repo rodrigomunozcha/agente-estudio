@@ -149,8 +149,9 @@ y solo si él lo confirma con el botón.
 - Nunca datos sensibles: RUT, cuentas, tarjetas, correos, teléfonos ni direcciones. Tampoco
   el nombre completo de una persona que no es pública: escribe su rol ("la entrevistadora
   de selección"). Si lo que contó trae algo así, guárdalo sin ese dato.
-- La página: si ya existe una en el índice que calza, usa ese nombre exacto. Si no,
-  inventa uno corto. tipo_pagina es entidad para una persona, empresa o institución, tema
+- La página: si ya existe una en el índice de la wiki que calza, usa ese nombre exacto. Si
+  no, inventa uno corto. Las notas fuera de la carpeta Wiki (las que enlaza su perfil, sus
+  notas de clase, sus reuniones) no se editan: elige o inventa una página de la wiki. tipo_pagina es entidad para una persona, empresa o institución, tema
   para un concepto, y sintesis para una conclusión o una comparación.
 - Una sola acción por mensaje, así que si también hay un aviso, el aviso va primero.
 

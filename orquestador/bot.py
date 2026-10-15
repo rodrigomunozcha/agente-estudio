@@ -267,23 +267,25 @@ def separar_accion(texto: str) -> tuple[dict | None, str]:
     return (accion if isinstance(accion, dict) else None), _ACCION.sub("", texto).strip()
 
 
-def revisar_accion(accion: dict, datos: dict) -> dict | None:
+def revisar_accion(accion: dict, datos: dict, config: dict | None = None) -> dict | None:
     """La accion limpia, o None si no tiene sentido. Las reglas viven en quien escribe:
     evaluaciones para las fechas y pendientes, memoria para los recuerdos."""
     if accion.get("tipo") == "memoria":
         try:
+            boveda = (config or {}).get("rutas", {}).get("vault_obsidian")
             return {"tipo": "memoria", "recuerdo": memoria.revisar(
-                {"pagina": accion.get("pagina"), "tipo": accion.get("tipo_pagina"), "texto": accion.get("texto")})}
+                {"pagina": accion.get("pagina"), "tipo": accion.get("tipo_pagina"), "texto": accion.get("texto")},
+                boveda)}
         except memoria.RecuerdoInvalido:
             return None
     return evaluaciones.revisar_accion_del_chat(accion, datos)
 
 
-def validar_accion(accion: dict, datos: dict) -> str | None:
+def validar_accion(accion: dict, datos: dict, config: dict | None = None) -> str | None:
     """La pregunta de confirmacion, o None si la accion no tiene sentido (ver
     revisar_accion): aqui solo se redacta el texto. Una accion invalida no se ofrece:
     se pierde el boton, no la conversacion."""
-    a = revisar_accion(accion, datos)
+    a = revisar_accion(accion, datos, config)
     if a is None:
         return None
     if a["tipo"] == "memoria":
@@ -391,12 +393,12 @@ def conversar(texto: str, estado: dict, config: dict) -> None:
         respuesta = respuesta or ("👌 Listo, retiré la propuesta. No anoté nada." if retirada
                                   else "👌 No tengo nada pendiente de confirmar.")
     else:
-        confirmacion = validar_accion(accion, datos) if accion else None
+        confirmacion = validar_accion(accion, datos, config) if accion else None
         if confirmacion:
             # Los botones de la propuesta anterior seguirian activos y, al tocarlos,
             # anotarian la nueva: se quitan antes de mostrar la que reemplaza.
             _retirar_propuesta(estado)
-            propuesta = {"tipo": "accion", "accion": revisar_accion(accion, datos)}
+            propuesta = {"tipo": "accion", "accion": revisar_accion(accion, datos, config)}
             respuesta = f"{respuesta}\n\n{confirmacion}".strip()
     # Se guarda antes de enviar: si Telegram falla, la conversacion y lo retirado
     # no se pierden. La propuesta y la respuesta votable se guardan despues, cuando
