@@ -18,7 +18,7 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import evaluaciones, telegram
+from . import evaluaciones, pregunta_ramo, telegram
 from .carpetas import resolver_carpeta_ramo
 from .config import cargar_config
 from .hoja_evaluacion import NOMBRES, clases_del_ramo, nombre_archivo, ramo_legible
@@ -75,7 +75,8 @@ def _evaluaciones(datos: dict, hoy: date, limite: str) -> list[tuple[str, str, s
              if ev.get("fecha") and hoy.isoformat() <= ev["fecha"] <= limite]
     lista += [(p["fecha"], p["ramo"], f"{ramo_legible(p['ramo'])}: {p['que']}", None)
               for p in evaluaciones.pendientes_activos(datos)
-              if hoy.isoformat() <= p.get("fecha", "") <= limite and _ES_EVALUACION.search(p.get("que", ""))]
+              if hoy.isoformat() <= p.get("fecha", "") <= limite and p.get("tipo") != "seguimiento"
+              and _ES_EVALUACION.search(p.get("que", ""))]
     return sorted(lista)
 
 
@@ -88,7 +89,8 @@ def resumen(hoy: date, datos: dict, config: dict, fin_de_semana: bool = False) -
     dias = lambda f: (date.fromisoformat(f) - hoy).days
     alertas = [(f, r, nombre, ev) for f, r, nombre, ev in evals if dias(f) in _AVISOS]
     pedidos = [p for p in evaluaciones.pendientes_activos(datos)
-               if p.get("fecha") == hoy.isoformat() and not _ES_EVALUACION.search(p.get("que", ""))]
+               if p.get("fecha") == hoy.isoformat() and p.get("tipo") != "seguimiento"
+               and not _ES_EVALUACION.search(p.get("que", ""))]
 
     # Se lee en el telefono, caminando: un bloque por tema, cada uno con su emoji,
     # y lo mas urgente arriba (pedido del estudiante, 30-09-2026).
@@ -173,10 +175,26 @@ def tabla_evaluaciones(datos: dict, config: dict, hoy: date) -> str:
     return "\n\n".join(bloques) or "📅 Todavía no hay evaluaciones anotadas."
 
 
-def _enviar_con_paciencia(funcion, *args) -> None:
+def seguimientos(datos: dict, hoy: date) -> list[tuple[str, dict]]:
+    """(texto, botones) de cada promesa de una reunion que vence hoy, o que vencio y
+    sigue sin respuesta: si el Mac estuvo apagado ese dia, se pregunta al siguiente.
+    Los botones los atiende el bot (bot.atender_boton), que es el que escucha a Telegram."""
+    salida = []
+    for p in sorted(evaluaciones.pendientes_activos(datos), key=lambda x: x.get("fecha", "")):
+        if p.get("tipo") != "seguimiento" or p.get("fecha", "") > hoy.isoformat():
+            continue
+        clave = evaluaciones.clave_pendiente(p)
+        texto = (f"⏳ ¿Cumplieron?\n• {p['que']}\n🤝 {p.get('reunion', 'Reunión')}"
+                 + (f" ({_fecha(p['clase'])})" if p.get("clase") else ""))
+        salida.append((texto, telegram.botones([("Sí", f"seg:si:{clave}"), ("No, pospón 1 semana", f"seg:no:{clave}"),
+                                                ("Descartar", f"seg:x:{clave}")], por_fila=3)))
+    return salida
+
+
+def _enviar_con_paciencia(funcion, *args, **kwargs) -> None:
     for intento in range(1, INTENTOS_SIN_CONEXION + 1):
         try:
-            funcion(*args)
+            funcion(*args, **kwargs)
             return
         except RuntimeError as e:
             if "sin conexión" not in str(e) or intento == INTENTOS_SIN_CONEXION:
@@ -187,12 +205,17 @@ def _enviar_con_paciencia(funcion, *args) -> None:
 def main() -> None:
     config = cargar_config()
     hoy = date.today()
-    texto, hojas = resumen(hoy, evaluaciones.cargar(), config, fin_de_semana=hoy.weekday() >= 5)
-    if texto is None:
-        return
-    _enviar_con_paciencia(telegram.enviar, texto)
-    for hoja in hojas:
-        _enviar_con_paciencia(telegram.enviar_documento, hoja, hoja.stem)
+    datos = evaluaciones.cargar()
+    texto, hojas = resumen(hoy, datos, config, fin_de_semana=hoy.weekday() >= 5)
+    if texto is not None:
+        _enviar_con_paciencia(telegram.enviar, texto)
+        for hoja in hojas:
+            _enviar_con_paciencia(telegram.enviar_documento, hoja, hoja.stem)
+    for texto_seg, botones in seguimientos(datos, hoy):
+        _enviar_con_paciencia(telegram.enviar, texto_seg, teclado=botones)
+    # Las grabaciones que siguen esperando de que son se recuerdan una vez, aqui: es lo
+    # unico que corre todos los dias aunque no llegue nada nuevo.
+    pregunta_ramo.recordar()
 
 
 if __name__ == "__main__":

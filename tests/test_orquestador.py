@@ -140,50 +140,6 @@ def probar_archivado_no_destructivo() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def probar_dialogo_nunca_descarta_solo() -> None:
-    """
-    Descartar una grabacion tiene que costar un clic explicito. Esto ya fallo
-    una vez con una clase real: el timeout y el boton por defecto llevaban los
-    dos a ignorar, y el audio se archivo solo mientras nadie miraba.
-    """
-    print("\n== el dialogo nunca descarta por su cuenta ==")
-    from orquestador import dialogo_no_reconocido as dlg
-
-    original = dlg._mostrar_dialogo_principal
-    casos = [
-        ("timeout o ventana cerrada", None, "solo_transcribir"),
-        ("clic explicito en Ignorar", dlg.OPCION_IGNORAR, "ignorar"),
-        ("clic en Solo transcribir", dlg.OPCION_SOLO_TRANSCRIBIR, "solo_transcribir"),
-    ]
-    try:
-        for nombre, respuesta, esperado in casos:
-            dlg._mostrar_dialogo_principal = lambda _t, _r=respuesta: _r
-            accion = dlg.preguntar_que_hacer({"archivos": [], "fecha": "1970-01-20",
-                                              "dia_semana": "martes"}, {})["accion"]
-            check(f"{nombre} -> {esperado}", accion == esperado, f"dio '{accion}'")
-
-        # Abandonar a mitad de elegir el ramo tampoco puede descartar.
-        dlg._mostrar_dialogo_principal = lambda _t: dlg.OPCION_APLICAR_SKILLS
-        original_ramo = dlg.elegir_ramo
-        dlg.elegir_ramo = lambda _c: None
-        try:
-            accion = dlg.preguntar_que_hacer({"archivos": [], "fecha": "1970-01-20",
-                                              "dia_semana": "martes"}, {})["accion"]
-            check("abandonar la eleccion de ramo -> solo_transcribir",
-                  accion == "solo_transcribir", f"dio '{accion}'")
-        finally:
-            dlg.elegir_ramo = original_ramo
-
-    finally:
-        dlg._mostrar_dialogo_principal = original
-
-    import inspect
-    fuente = inspect.getsource(original)
-    check("el boton por defecto del dialogo no es el que descarta",
-          "default button {_escapar(OPCION_IGNORAR)}" not in fuente
-          and "OPCION_SOLO_TRANSCRIBIR" in fuente)
-
-
 def probar_el_nombre_del_archivo_manda_sobre_el_dia() -> None:
     """
     El caso real que esto arregla: el 26-08-2026 (miercoles) se subieron dos
@@ -292,95 +248,6 @@ def probar_el_nombre_del_archivo_manda_sobre_el_dia() -> None:
     por_dia = deteccion.resolver_ramo_de_grabacion(["Nota de voz 3.m4a"], miercoles, config)
     check("sin nombre util se mantiene el comportamiento de siempre",
           por_dia and por_dia["nombre"] == "BIOLOGÍA CELULAR", f"dio {por_dia}")
-
-
-def probar_pantalla_de_confirmacion() -> None:
-    """
-    La pantalla pregunta por todas las grabaciones juntas antes de empezar, y
-    reemplaza al dialogo de a una por vez. Lo que se prueba es que ningun
-    camino de fallo deje al estudiante peor que antes de que existiera:
-
-    - Sin el binario compilado se sigue por el dialogo viejo, que SI pregunta.
-      Caer a "no hacer nada" seria dejar de preguntar algo que hoy se pregunta.
-    - Con el binario presente pero fallando (no arranca, devuelve basura, vence
-      el tiempo), se procesa lo reconocido y lo dudoso queda para el proximo
-      clic. Es el comportamiento anterior a la pantalla.
-    - Una respuesta invalida no se cree a medias: cae entera al defecto.
-    """
-    print("\n== la pantalla de confirmacion nunca deja al usuario peor ==")
-    from orquestador import pantalla_confirmacion as pc
-
-    config = {
-        "ramos": {"miercoles": {"nombre": "BIOLOGÍA CELULAR", "perfil_whisper": "es-chile"}},
-        "ramos_adicionales": {},
-    }
-    trabajos = [
-        {"clave": "k1", "archivos": ["/x/Biología celular 26.08.26.m4a"],
-         "fecha": "2026-08-26", "dia_semana": "miercoles",
-         "ramo": "BIOLOGÍA CELULAR", "reconocido": True},
-        {"clave": "k2", "archivos": ["/x/Evaluación conocimientos intermedios 26.08.26.m4a"],
-         "fecha": "2026-08-26", "dia_semana": "miercoles", "ramo": None, "reconocido": False},
-    ]
-
-    # La duracion se mide con ffprobe sobre archivos que aqui no existen.
-    original_duracion = pc.duracion_audio_segundos
-    pc.duracion_audio_segundos = lambda _r: None
-    original_binario = pc.BINARIO
-    try:
-        descripcion = pc.describir(trabajos, config)
-        check("describe cada grabacion con el origen de su ramo",
-              descripcion["grabaciones"][0]["origen"] == "nombre"
-              and descripcion["grabaciones"][1]["origen"] is None,
-              str([g["origen"] for g in descripcion["grabaciones"]]))
-        check("ofrece los ramos conocidos para elegir",
-              "BIOLOGÍA CELULAR" in descripcion["ramos"])
-
-        # Sin binario: hay que seguir preguntando por el camino viejo.
-        pc.BINARIO = Path("/no/existe/ConfirmarGrabaciones")
-        check("sin el binario compilado se cae al dialogo de siempre",
-              pc.preguntar(trabajos, config) is None)
-
-        # Con binario, pero la ventana falla o vence el tiempo.
-        pc.BINARIO = original_binario
-        por_defecto = pc._decisiones_por_defecto(descripcion)
-        check("por defecto, lo reconocido se procesa",
-              por_defecto["k1"]["que_hacer"] == pc.PROCESAR)
-        check("por defecto, lo dudoso queda para el proximo clic",
-              por_defecto["k2"]["que_hacer"] == pc.OMITIR)
-
-        # Respuestas que no se pueden creer.
-        invalidas = [
-            ("una clave que no existe", {"accion": "procesar", "decisiones": [
-                {"clave": "inventada", "que_hacer": "procesar", "ramo": "X"}]}),
-            ("una accion desconocida", {"accion": "procesar", "decisiones": [
-                {"clave": "k1", "que_hacer": "borrar_todo"}]}),
-            ("procesar sin ramo", {"accion": "procesar", "decisiones": [
-                {"clave": "k1", "que_hacer": "procesar", "ramo": "  "}]}),
-            ("la ventana se cerro", {"accion": "cerrada"}),
-            ("vencio el tiempo", {"accion": "timeout"}),
-        ]
-        for nombre, respuesta in invalidas:
-            check(f"{nombre} -> se ignora entera",
-                  pc._validar(respuesta, descripcion) is None)
-
-        # Una respuesta valida si se respeta.
-        buena = {"accion": "procesar", "decisiones": [
-            {"clave": "k1", "que_hacer": "procesar", "ramo": "BIOLOGÍA CELULAR"},
-            {"clave": "k2", "que_hacer": "procesar", "ramo": "EIC", "ramo_nuevo": True},
-        ]}
-        validadas = pc._validar(buena, descripcion)
-        check("una respuesta valida se respeta", validadas is not None
-              and validadas["k2"]["ramo"] == "EIC" and validadas["k2"]["ramo_nuevo"])
-
-        # Una grabacion sobre la que la ventana no dijo nada conserva su default.
-        parcial = {"accion": "procesar", "decisiones": [
-            {"clave": "k1", "que_hacer": "omitir"}]}
-        validadas = pc._validar(parcial, descripcion)
-        check("lo que la ventana no menciona conserva su valor por defecto",
-              validadas["k2"]["que_hacer"] == pc.OMITIR, str(validadas))
-    finally:
-        pc.duracion_audio_segundos = original_duracion
-        pc.BINARIO = original_binario
 
 
 def probar_decisiones_de_pantalla_se_aplican() -> None:
@@ -1796,6 +1663,54 @@ def probar_reunion_audio_txt_y_docx_con_el_mismo_nombre() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_reunion_en_un_solo_lugar() -> None:
+    """
+    Fuera de un ensayo, una reunion deja la grabacion, la transcripcion y el .docx
+    juntos en la carpeta de reuniones, con el mismo nombre. La grabacion se mueve y la
+    transcripcion se copia. Carpetas temporales y el analisis guardado de antemano.
+    """
+    print("\n== cada reunion en un solo lugar ==")
+    import asyncio
+    import json
+
+    from orquestador import reuniones as rn
+
+    base = Path(tempfile.mkdtemp(prefix="reunion_lugar_"))
+    pendientes = base / "pendientes"
+    pendientes.mkdir()
+    audio = base / "Input" / "grabacion.m4a"
+    audio.parent.mkdir()
+    audio.write_bytes(b"a")
+    texto = pendientes / "s1.txt"
+    texto.write_text("lo que se dijo", encoding="utf-8")
+    (pendientes / "s1_reunion.json").write_text(json.dumps({
+        "titulo": "Café con un profe", "tipo": "conversacion", "calidad_audio": "buena",
+        "resumen": "Hablamos.", "decisiones": [], "acciones": [], "preguntas_abiertas": [],
+        "entrevista": None, "investigar": []}, ensure_ascii=False), encoding="utf-8")
+    config = {"rutas": {"output": str(base / "Output"), "procesados": str(base / "Procesados"),
+                        "vault_obsidian": str(base / "vault")}}
+    originales = (rn.notificar_reunion, rn.CARPETA_DOCX, rn.evaluaciones.RUTA)
+    rn.notificar_reunion = lambda *a, **k: None
+    rn.CARPETA_DOCX, rn.evaluaciones.RUTA = base / "Reuniones post Claude", base / "evaluaciones.json"
+    rn.evaluaciones.guardar({"ramos": {}, "pendientes": []})
+    usar_dir_pendientes(pendientes)
+    try:
+        docx = asyncio.run(rn.procesar_reunion(
+            {"slug": "s1", "fecha": "2026-10-07", "ramo": rn.RAMO,
+             "archivos_originales": [str(audio)], "archivo_texto": str(texto)}, config))
+        esperado = "07.10.26 - Café con un profe - Reunión"
+        juntos = sorted(p.name for p in docx.parent.iterdir())
+        check("grabación, transcripción y .docx quedan juntos, con el mismo nombre",
+              juntos == [f"{esperado}.docx", f"{esperado}.m4a", f"{esperado}.txt"], str(juntos))
+        sala = sorted(p.name for p in (base / "Procesados" / rn.RAMO).iterdir())
+        check("la grabación no queda dos veces: en la sala de trabajo solo la transcripción",
+              sala == [f"{esperado}.txt"], str(sala))
+    finally:
+        rn.notificar_reunion, rn.CARPETA_DOCX, rn.evaluaciones.RUTA = originales
+        usar_dir_pendientes(None)
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def probar_renumerar_corrige_la_hoja() -> None:
     """
     En los ramos con numeracion por orden, una clase mas antigua que llega tarde
@@ -1926,79 +1841,67 @@ def probar_clase_completa_termina_en_notas_y_hoja() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
-def probar_copia_a_onedrive() -> None:
+def probar_clase_en_un_solo_lugar() -> None:
     """
-    La hoja de cada clase tiene que llegar sola a la carpeta del ramo en
-    OneDrive, que es la que el estudiante abre desde el iPhone. Se prueba con un
-    copiador falso que imita al de _herramientas (SEMESTRE, DESTINO, FUENTES, md5
-    y main), para no tocar la carpeta real.
+    Una clase termina en la carpeta de su ramo en OneDrive, en Clases/, con el audio,
+    la transcripcion y la hoja juntos y con el mismo nombre. El audio se mueve y lo
+    demas se copia: Procesados y Output quedan como sala de trabajo. Nunca pisa, no
+    toca la carpeta real en un ensayo, y detener la corrida lo deshace. La carpeta
+    del ramo sale de carpetas_onedrive en config.json. Todo en carpetas temporales.
     """
-    print("\n== la hoja de la clase llega a OneDrive ==")
-    import textwrap
+    print("\n== cada clase en un solo lugar ==")
+    from orquestador import archivado as ar
+    from orquestador.bitacora import Bitacora
 
-    from orquestador import onedrive as od
-
-    base = Path(tempfile.mkdtemp(prefix="onedrive_"))
-    salida = base / "Output" / "RAMO DE PRUEBA"
+    base = Path(tempfile.mkdtemp(prefix="clase_lugar_"))
+    ramo = "RAMO DE PRUEBA"
+    nombre = "09.09.26 - Una clase de prueba - Ramo de Prueba"
+    procesados, salida = base / "Procesados" / ramo, base / "Output" / ramo
+    procesados.mkdir(parents=True)
     salida.mkdir(parents=True)
-    hoja = salida / "Clase 01 - 2026-09-29 - Prueba.html"
-    hoja.write_text("<html>hoja</html>", encoding="utf-8")
-    semestre = base / "Semestre"
-    (semestre / "Ramo de prueba").mkdir(parents=True)
-    fuentes = [("Ramo de prueba", str(salida), "*.html")]
+    carpeta_ramo = base / "OneDrive" / "Ramo de prueba"
+    carpeta_ramo.mkdir(parents=True)
+    config = {"rutas": {"procesados": str(base / "Procesados"), "output": str(base / "Output")},
+              "carpetas_onedrive": {ramo: str(carpeta_ramo)}}
 
-    def copiador_falso(fuentes: list, falla: bool = False) -> Path:
-        ruta = base / f"copiador_{len(list(base.glob('copiador_*')))}.py"
-        ruta.write_text(textwrap.dedent(f"""
-            import hashlib, shutil
-            from pathlib import Path
-            SEMESTRE = Path({str(semestre)!r})
-            DESTINO = "Creada por Claude"
-            FUENTES = {fuentes!r}
-            def md5(p):
-                return hashlib.md5(Path(p).read_bytes()).hexdigest()
-            def main():
-                if {falla!r}:
-                    raise OSError("OneDrive no esta montado")
-                for ramo, origen, patron in FUENTES:
-                    destino = SEMESTRE / ramo / DESTINO
-                    destino.mkdir(exist_ok=True)
-                    for f in Path(origen).glob(patron):
-                        shutil.copy2(f, destino / f.name)
-        """), encoding="utf-8")
-        return ruta
+    def clase():
+        audio, txt, hoja = procesados / f"{nombre}.m4a", procesados / f"{nombre}.txt", salida / f"{nombre}.html"
+        audio.write_bytes(b"audio comprimido")
+        txt.write_text("transcripcion", encoding="utf-8")
+        hoja.write_text("<html>hoja</html>", encoding="utf-8")
+        return [audio, txt], hoja
 
-    avisos = []
-    originales = (od.COPIADOR, od.notificar_aviso)
-    od.notificar_aviso = lambda titulo, mensaje: avisos.append((titulo, mensaje))
     try:
-        od.COPIADOR = copiador_falso(fuentes)
-        copia = od.copiar_a_onedrive(hoja, {})
-        check("la hoja queda en Creada por Claude del ramo",
-              copia is not None and copia.parent == semestre / "Ramo de prueba" / "Creada por Claude"
-              and copia.read_bytes() == hoja.read_bytes(), str(copia))
-        check("y sin avisos", avisos == [], str(avisos))
+        archivados, hoja = clase()
+        clases = ar.publicar_en_onedrive(archivados, hoja, ramo, config)
+        check("audio, transcripción y hoja quedan juntos en Clases, con el mismo nombre",
+              clases == carpeta_ramo / "Clases"
+              and sorted(p.name for p in clases.iterdir()) == [f"{nombre}.html", f"{nombre}.m4a", f"{nombre}.txt"],
+              str(list(clases.iterdir())) if clases else "None")
+        check("el audio se mueve y no queda dos veces, la transcripción y la hoja se copian",
+              not archivados[0].exists() and archivados[1].is_file() and hoja.is_file())
 
-        check("en ensayo no toca OneDrive",
-              od.copiar_a_onedrive(hoja, {ensayo.CLAVE: True}) is None and avisos == [], str(avisos))
+        archivados, hoja = clase()
+        ar.publicar_en_onedrive(archivados, hoja, ramo, config)
+        check("una clase con el mismo nombre no pisa la que ya estaba",
+              (clases / f"{nombre} (2).m4a").is_file()
+              and (clases / f"{nombre}.m4a").read_bytes() == b"audio comprimido")
 
-        od.COPIADOR = copiador_falso([])
-        check("si su carpeta no esta en FUENTES, avisa y sigue",
-              od.copiar_a_onedrive(hoja, {}) is None and len(avisos) == 1
-              and "FUENTES" in avisos[0][1], str(avisos))
+        archivados, hoja = clase()
+        check("un ramo sin carpeta declarada no publica ni mueve nada",
+              ar.publicar_en_onedrive(archivados, hoja, "OTRO RAMO", config) is None and archivados[0].is_file())
+        check("en un ensayo no toca OneDrive",
+              ar.publicar_en_onedrive(archivados, hoja, ramo, dict(config, **{ensayo.CLAVE: True})) is None
+              and archivados[0].is_file())
 
-        avisos.clear()
-        od.COPIADOR = copiador_falso(fuentes, falla=True)
-        check("si OneDrive falla, avisa con el motivo y sigue",
-              od.copiar_a_onedrive(hoja, {}) is None and len(avisos) == 1
-              and "OneDrive no esta montado" in avisos[0][1], str(avisos))
-
-        avisos.clear()
-        od.COPIADOR = base / "no_existe.py"
-        check("si falta el copiador, avisa y sigue",
-              od.copiar_a_onedrive(hoja, {}) is None and len(avisos) == 1, str(avisos))
+        nuevo = dict(config, carpetas_onedrive={ramo: str(base / "OneDrive" / "Ramo nuevo")})
+        (base / "OneDrive" / "Ramo nuevo").mkdir()
+        b = Bitacora(base / "bitacora.json")
+        publicada = ar.publicar_en_onedrive(archivados, hoja, ramo, nuevo, b)
+        b.deshacer()
+        check("detener la corrida devuelve el audio y saca las copias",
+              publicada is not None and archivados[0].is_file() and not publicada.exists(), str(publicada))
     finally:
-        od.COPIADOR, od.notificar_aviso = originales
         shutil.rmtree(base, ignore_errors=True)
 
 
@@ -2183,7 +2086,6 @@ def probar_material_de_onedrive() -> None:
     controles, y un contrato en la raiz del semestre.
     """
     print("\n== material de OneDrive, con lista blanca ==")
-    import textwrap
 
     from orquestador import onedrive as od
 
@@ -2237,23 +2139,16 @@ def probar_material_de_onedrive() -> None:
     check("nunca abre LinkedIn, .docx, libros, controles, lo del agente ni la raiz",
           not todos & prohibidos, str(todos & prohibidos))
 
-    original = od.COPIADOR
-    od.COPIADOR = semestre / "copiador.py"
-    od.COPIADOR.write_text(textwrap.dedent(f"""
-        from pathlib import Path
-        SEMESTRE = Path({str(semestre)!r})
-        FUENTES = [("Ramo X", "/no/importa/Output/RAMO X", "*.html")]
-    """), encoding="utf-8")
+    config = {"carpetas_onedrive": {"RAMO X": str(ramo)}}
     try:
-        material = {m["archivo"]: m for m in od.leer_material("RAMO X", "S2", "prueba")}
+        material = {m["archivo"]: m for m in od.leer_material("RAMO X", "S2", "prueba", None, config)}
         check("lee el texto de cada PDF",
               material.get("SOLEMNE-N2_RAMOX-PAUTA.pdf", {}).get("texto") == "Pregunta sobre oligopolio",
               str(material))
         check("y marca el escaneado como sin texto",
               material.get("Solemne-2-escaneada.pdf", {}).get("sin_texto") is True)
-        check("un ramo que no esta en FUENTES no trae material", od.leer_material("MIC", "S2", "prueba") == [])
+        check("un ramo sin carpeta declarada no trae material", od.leer_material("MIC", "S2", "prueba", None, config) == [])
     finally:
-        od.COPIADOR = original
         shutil.rmtree(semestre, ignore_errors=True)
 
 
@@ -2267,12 +2162,10 @@ def probar_hoja_por_evaluacion() -> None:
     """
     print("\n== hoja por evaluacion ==")
     import asyncio
-    import textwrap
     from datetime import timedelta
 
     from orquestador import evaluaciones as ev
     from orquestador import hoja_evaluacion as he
-    from orquestador import onedrive as od
 
     hoy = date.today()
     dia = lambda n: (hoy + timedelta(days=n)).isoformat()  # noqa: E731
@@ -2295,14 +2188,9 @@ def probar_hoja_por_evaluacion() -> None:
         _pdf_con_texto("Pregunta pasada sobre tema dos"))
     (semestre / "Ramo de prueba" / "Instrucciones-Trabajo.pdf").write_bytes(
         _pdf_con_texto("Entregar un informe"))
-    copiador = base / "copiador.py"
-    copiador.write_text(textwrap.dedent(f"""
-        from pathlib import Path
-        SEMESTRE = Path({str(semestre)!r})
-        FUENTES = [("Ramo de prueba", "/no/importa/Output/{ramo}", "*.html")]
-    """), encoding="utf-8")
     config = {"rutas": {"vault_obsidian": str(base / "vault"), "output": str(base / "Output")},
-              "carpetas_ramo": {ramo: str(carpeta)}}
+              "carpetas_ramo": {ramo: str(carpeta)},
+              "carpetas_onedrive": {ramo: str(semestre / "Ramo de prueba")}}
     salida = base / "Output" / ramo / "Evaluaciones" / "Solemne 2 - Ramo de Prueba.html"
     en_onedrive = semestre / "Ramo de prueba" / "Creada por Claude" / salida.name
 
@@ -2313,9 +2201,9 @@ def probar_hoja_por_evaluacion() -> None:
         pedidos.append((system_prompt, prompt))
         return (None, respuesta["motivo"]) if respuesta["motivo"] else (respuesta["cuerpo"], None)
 
-    originales = (ev.RUTA, od.COPIADOR, he.pedir_hoja, he.notificar_aviso,
+    originales = (ev.RUTA, he.pedir_hoja, he.notificar_aviso,
                   he.notificar_hoja_evaluacion, he.notificar_progreso)
-    ev.RUTA, od.COPIADOR, he.pedir_hoja = base / "evaluaciones.json", copiador, pedir_falso
+    ev.RUTA, he.pedir_hoja = base / "evaluaciones.json", pedir_falso
     he.notificar_aviso = lambda titulo, mensaje: avisos.append((titulo, mensaje))
     he.notificar_hoja_evaluacion = lambda *a: hojas.append(a)
     he.notificar_progreso = lambda *a, **kw: None
@@ -2342,6 +2230,8 @@ def probar_hoja_por_evaluacion() -> None:
         check("queda igual en OneDrive y lo avisa",
               en_onedrive.is_file() and en_onedrive.read_text(encoding="utf-8") == documento
               and hojas[-1][2:] == (2, salida, True), str(hojas))
+        check("en la carpeta de cosas creadas con Claude, separada de las clases",
+              not (semestre / "Ramo de prueba" / "Clases").exists())
 
         respuesta["cuerpo"] = "<section>segunda version</section>"
         asyncio.run(he.actualizar_tras_clase(ramo, dia(-3), config))
@@ -2378,7 +2268,7 @@ def probar_hoja_por_evaluacion() -> None:
               and "Pregunta pasada" not in prompt
               and "Hoja del trabajo" in salida.read_text(encoding="utf-8"))
     finally:
-        (ev.RUTA, od.COPIADOR, he.pedir_hoja, he.notificar_aviso,
+        (ev.RUTA, he.pedir_hoja, he.notificar_aviso,
          he.notificar_hoja_evaluacion, he.notificar_progreso) = originales
         shutil.rmtree(base, ignore_errors=True)
 
@@ -2666,13 +2556,11 @@ def probar_bot_de_telegram() -> None:
     """
     print("\n== bot de Telegram ==")
     import json
-    import textwrap
     from datetime import datetime as _dt
     from datetime import timedelta as _td
 
     from orquestador import bot as b
     from orquestador import evaluaciones as ev
-    from orquestador import onedrive as od
 
     base = Path(tempfile.mkdtemp(prefix="bot_"))
     ramo = "RAMO DE PRUEBA"
@@ -2680,14 +2568,9 @@ def probar_bot_de_telegram() -> None:
     vault.mkdir(parents=True)
     semestre = base / "Semestre"
     (semestre / "Ramo de prueba").mkdir(parents=True)
-    copiador = base / "copiador.py"
-    copiador.write_text(textwrap.dedent(f"""
-        from pathlib import Path
-        SEMESTRE = Path({str(semestre)!r})
-        FUENTES = [("Ramo de prueba", "/no/importa/Output/{ramo}", "*.html")]
-    """), encoding="utf-8")
     config = {"rutas": {"output": str(base / "Output"), "vault_obsidian": str(base / "vault")},
               "carpetas_ramo": {ramo: str(vault)},
+              "carpetas_onedrive": {ramo: str(semestre / "Ramo de prueba")},
               "ramos": {"lunes": {"nombre": ramo, "inicio": "08:30", "fin": "10:00", "sala": "A-101"}}}
     datos = {"ramos": {ramo: [{"nombre": "S2", "fecha": "2026-11-09", "tipo": "prueba",
                                "fuente": "clase", "clase": "2026-09-28",
@@ -2712,15 +2595,23 @@ def probar_bot_de_telegram() -> None:
         destino.write_bytes(b"foto")
         return destino
 
-    quitados = []
+    cambios = []  # (mensaje, botones con que queda) de cada cambiar_botones
     tg = b.telegram
     originales = (tg.enviar, tg.editar, tg.escribiendo, tg.responder_boton, tg.descargar,
-                  b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.quitar_botones)
+                  b._preguntar, b.RUTA_ESTADO, ev.RUTA, b.cargar_config, tg.cambiar_botones,
+                  b.RUTA_OPINIONES)
     tg.enviar, tg.editar = enviar, (lambda mid, texto, chat_id=None: editados.append(texto))
-    tg.quitar_botones = lambda mid, chat_id=None: quitados.append(mid)
+    tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
+    b.RUTA_OPINIONES = base / "opiniones.jsonl"
+
+    def datos_de(teclado):
+        return [x["callback_data"] for fila in (teclado or {}).get("inline_keyboard", []) for x in fila]
+
+    def confirma(teclado):
+        return "si" in datos_de(teclado)
     tg.escribiendo, tg.responder_boton, tg.descargar = (lambda *a: None), (lambda *a: None), descargar
     b._preguntar, b.RUTA_ESTADO = preguntar_falso, base / "bot_estado.json"
-    ev.RUTA, od.COPIADOR, b.cargar_config = base / "evaluaciones.json", copiador, (lambda: config)
+    ev.RUTA, b.cargar_config = base / "evaluaciones.json", (lambda: config)
     ev.guardar(datos)
 
     def mensaje(texto=None, chat=1, **extra):
@@ -2759,7 +2650,7 @@ def probar_bot_de_telegram() -> None:
         b.atender(mensaje("falté a la clase del lunes"), 1)
         texto, teclado = enviados[-1]
         check("un aviso que cambia fechas pide confirmacion con botones, sin mostrar la linea ACCION",
-              "ACCION" not in texto and "¿Anoto que faltaste" in texto and teclado is not None, texto)
+              "ACCION" not in texto and "¿Anoto que faltaste" in texto and confirma(teclado), texto)
         b.atender(boton("si"), 1)
         check("y lo anota solo al confirmar",
               ev.cargar()["clases_perdidas"] == [{"ramo": ramo, "fecha": "2026-10-05"}]
@@ -2775,7 +2666,7 @@ def probar_bot_de_telegram() -> None:
 
         respuesta["texto"] = "Ok.\nACCION: {\"tipo\": \"clase_perdida\", \"ramo\": \"OTRO\", \"fecha\": \"2026-10-05\"}"
         b.atender(mensaje("falté a otro ramo"), 1)
-        check("una accion con un ramo que no existe no ofrece botones", enviados[-1][1] is None)
+        check("una accion con un ramo que no existe no ofrece botones", not confirma(enviados[-1][1]))
         check("el bot conoce el horario", "lunes: Ramo de Prueba, 08:30 a 10:00, sala A-101"
               in respuesta["prompt"], respuesta["prompt"][-600:])
 
@@ -2793,7 +2684,7 @@ def probar_bot_de_telegram() -> None:
                               + "\", \"fecha\": \"2036-10-13\", \"que\": \"Control 2\"}")
         b.atender(mensaje("el lunes 12 hay control 2"), 1)
         check("un control contado por el chat pide confirmacion",
-              "¿Anoto para el lunes 13 de octubre" in enviados[-1][0] and enviados[-1][1] is not None,
+              "¿Anoto para el lunes 13 de octubre" in enviados[-1][0] and confirma(enviados[-1][1]),
               enviados[-1][0])
         b.atender(boton("si"), 1)
         b.atender(mensaje("el lunes 12 hay control 2"), 1)
@@ -2827,7 +2718,7 @@ def probar_bot_de_telegram() -> None:
         b.atender(mensaje("se suspendió la clase de hoy"), 1)
         texto, teclado = enviados[-1]
         check("una clase suspendida se propone como suspendida, sin decir que faltaste, y sin relleno",
-              "se suspendió" in texto and "faltaste" not in texto and teclado is not None
+              "se suspendió" in texto and "faltaste" not in texto and confirma(teclado)
               and texto.startswith("📝"), texto)
         b.atender(boton_en("si", len(enviados)), 1)
         datos_ev = ev.cargar()
@@ -2847,8 +2738,8 @@ def probar_bot_de_telegram() -> None:
         respuesta["texto"] = 'ACCION: {"tipo": "cancelar"}'
         b.atender(mensaje("no, esa no era"), 1)
         check("cancelar retira la propuesta, le quita los botones y avisa que no anotó nada",
-              quitados[-1] == propuesta and "No anoté nada" in enviados[-1][0]
-              and "pendiente" not in json.loads(b.RUTA_ESTADO.read_text()), f"{quitados} {enviados[-1]}")
+              cambios[-1][0] == propuesta and not confirma(cambios[-1][1]) and "No anoté nada" in enviados[-1][0]
+              and "pendiente" not in json.loads(b.RUTA_ESTADO.read_text()), f"{cambios[-1:]} {enviados[-1]}")
         b.atender(boton_en("si", propuesta), 1)
         check("y tocar ese botón después no anota nada",
               "ya no está vigente" in enviados[-1][0]
@@ -2862,7 +2753,8 @@ def probar_bot_de_telegram() -> None:
         respuesta["texto"] = accion(tipo="pendiente", fecha="2036-11-09", que="Entrega 2")
         b.atender(mensaje("perdón, era el 9"), 1)
         segunda = len(enviados)
-        check("una propuesta nueva le quita los botones a la anterior", quitados[-1] == primera, str(quitados))
+        check("una propuesta nueva le quita el Sí/No a la anterior",
+              cambios[-1][0] == primera and not confirma(cambios[-1][1]), str(cambios[-1:]))
         b.atender(boton_en("si", primera), 1)
         check("y el botón de la anterior no confirma la nueva",
               "ya no está vigente" in enviados[-1][0]
@@ -2876,7 +2768,7 @@ def probar_bot_de_telegram() -> None:
         b.atender(mensaje("ya hice el control 2"), 1)
         texto, teclado = enviados[-1]
         check("marcar un pendiente como hecho pide confirmación, aunque no diga la fecha ni las mayúsculas",
-              "Control 2" in texto and "hecho" in texto and teclado is not None, texto)
+              "Control 2" in texto and "hecho" in texto and confirma(teclado), texto)
         b.atender(boton_en("si", len(enviados)), 1)
         dia = _date(2036, 10, 13)
         check("y deja de salir en /pendientes, pero los otros siguen",
@@ -2888,13 +2780,103 @@ def probar_bot_de_telegram() -> None:
               [x["estado"] for x in ev.cargar()["pendientes"] if x["que"] == "Control 2"] == ["hecho"])
         respuesta["texto"] = accion(tipo="hecho", que="Control 2")
         b.atender(mensaje("ya hice el control 2"), 1)
-        check("uno que ya está hecho no se vuelve a ofrecer", enviados[-1][1] is None)
+        check("uno que ya está hecho no se vuelve a ofrecer", not confirma(enviados[-1][1]))
         respuesta["texto"] = accion(tipo="hecho", que="Algo que nunca anoté")
         b.atender(mensaje("ya hice algo"), 1)
-        check("ni uno que no existe", enviados[-1][1] is None)
+        check("ni uno que no existe", not confirma(enviados[-1][1]))
         respuesta["texto"] = accion(tipo="hecho", que="Mandar el CV").replace(ramo, "REUNIÓN")
         b.atender(mensaje("ya mandé el CV"), 1)
-        check("el pendiente de una reunión también se marca", enviados[-1][1] is not None, enviados[-1][0])
+        check("el pendiente de una reunión también se marca", confirma(enviados[-1][1]), enviados[-1][0])
+
+        # --- 👍/👎 en cada respuesta ---
+        def opiniones():
+            ruta = b.RUTA_OPINIONES
+            return [json.loads(x) for x in ruta.read_text().splitlines()] if ruta.exists() else []
+
+        respuesta["texto"] = "La elasticidad mide la sensibilidad... (clase 28-09)"
+        b.atender(mensaje("¿qué es la elasticidad?"), 1)
+        votada = len(enviados)
+        check("cada respuesta lleva 👍 y 👎, sin Sí/No si no propone nada",
+              datos_de(enviados[-1][1]) == ["voto:+", "voto:-"], str(enviados[-1][1]))
+        b.atender(boton_en("voto:-", votada), 1)
+        texto, teclado = enviados[-1]
+        check("👎 pregunta en una línea qué faltó, como respuesta opcional",
+              "¿Qué faltó?" in texto and (teclado or {}).get("force_reply") is True, texto)
+        check("y le quita los votos a esa respuesta", cambios[-1] == (votada, None), str(cambios[-1:]))
+        reg = opiniones()
+        check("el 👎 queda registrado con la pregunta, la respuesta y la sesión",
+              len(reg) == 1 and reg[0]["voto"] == "-" and reg[0]["pregunta"] == "¿qué es la elasticidad?"
+              and reg[0]["respuesta"].startswith("La elasticidad") and reg[0]["sesion"] == "sesion-1", str(reg))
+        llamadas = len(sesiones)
+        b.atender(mensaje("le faltó un ejemplo numérico", reply_to_message={"message_id": len(enviados)}), 1)
+        reg = opiniones()
+        check("contestar esa pregunta deja el motivo, sin llamar al modelo",
+              reg[-1]["motivo"] == "le faltó un ejemplo numérico" and reg[-1]["voto"] == "-"
+              and len(sesiones) == llamadas and "Gracias" in enviados[-1][0], str(reg[-1:]))
+        b.atender(boton_en("voto:+", votada), 1)
+        check("una respuesta ya votada no se vota de nuevo",
+              "ya no está vigente" in enviados[-1][0] and len(opiniones()) == 2)
+
+        b.atender(mensaje("¿y la elasticidad cruzada?"), 1)
+        b.atender(boton_en("voto:-", len(enviados)), 1)
+        b.atender(mensaje("otra pregunta, sin contestar el qué faltó"), 1)
+        check("ignorar el qué faltó deja seguir conversando",
+              len(sesiones) == llamadas + 2 and opiniones()[-1]["motivo"] is None)
+        b.atender(boton_en("voto:+", len(enviados)), 1)
+        check("👍 queda registrado sin preguntar nada",
+              opiniones()[-1]["voto"] == "+" and "Qué faltó" not in enviados[-1][0])
+
+        respuesta["texto"] = accion(tipo="pendiente", fecha="2036-12-01", que="Entrega 3")
+        b.atender(mensaje("hay una entrega el 1"), 1)
+        propuesta = len(enviados)
+        check("una propuesta lleva Sí/No y además los votos",
+              datos_de(enviados[-1][1]) == ["si", "no", "voto:+", "voto:-"], str(enviados[-1][1]))
+        b.atender(boton_en("si", propuesta), 1)
+        check("al confirmar se va el Sí/No y quedan los votos",
+              cambios[-1][0] == propuesta and datos_de(cambios[-1][1]) == ["voto:+", "voto:-"], str(cambios[-1:]))
+
+        # --- Memoria: perfil, wiki y guardar con confirmacion ---
+        wiki = base / "vault" / "Wiki"
+        wiki.mkdir()
+        (wiki / "Perfil de Alguien.md").write_text("# Perfil\n\nEstudia de noche y busca práctica.", encoding="utf-8")
+        (wiki / "Índice - Wiki.md").write_text("# Índice - Wiki\n\n## Personas y organizaciones\n", encoding="utf-8")
+        (wiki / "Registro - Wiki.md").write_text("# Registro - Wiki\n", encoding="utf-8")
+        respuesta["texto"] = "Hola."
+        b.atender(mensaje("hola"), 1)
+        check("el bot trae el perfil en su prompt fijo y puede leer la wiki",
+              "Estudia de noche y busca práctica." in respuesta["system"]
+              and str(wiki) in respuesta["system"] and wiki in b._raices_de_lectura(config))
+        check("pero no el resto de la bóveda", base / "vault" not in b._raices_de_lectura(config))
+
+        recuerdo = dict(tipo="memoria", pagina="Empresa Ejemplo", tipo_pagina="entidad",
+                        texto="Pasé a la segunda etapa de la práctica, que es un caso grupal")
+        respuesta["texto"] = "Qué bueno.\n" + accion(**recuerdo)
+        b.atender(mensaje("pasé a la segunda etapa en Empresa Ejemplo"), 1)
+        texto, teclado = enviados[-1]
+        check("ofrece guardarlo con un botón, mostrando el texto exacto",
+              "🧠 ¿Lo guardo en tu memoria?\n📄 Empresa Ejemplo\n• Pasé a la segunda etapa" in texto
+              and teclado["inline_keyboard"][0][0]["text"] == "Sí, guárdalo", texto)
+        check("y sin confirmar no escribe nada", not (wiki / "Personas y organizaciones").exists())
+        b.atender(boton_en("si", len(enviados)), 1)
+        guardada = wiki / "Personas y organizaciones" / "Empresa Ejemplo.md"
+        check("al confirmar queda en la wiki, con el índice y el registro",
+              guardada.is_file() and "caso grupal" in guardada.read_text(encoding="utf-8")
+              and "[[Empresa Ejemplo]]" in (wiki / "Índice - Wiki.md").read_text(encoding="utf-8")
+              and "Empresa Ejemplo" in (wiki / "Registro - Wiki.md").read_text(encoding="utf-8")
+              and "Guardado en tu memoria" in enviados[-1][0], enviados[-1][0])
+        (base / "vault" / "Carrera").mkdir()
+        (base / "vault" / "Carrera" / "Proceso de práctica.md").write_text("nota fuente", encoding="utf-8")
+        respuesta["texto"] = accion(**dict(recuerdo, pagina="Proceso de práctica"))
+        b.atender(mensaje("la práctica parte en enero"), 1)
+        check("no ofrece guardar en una nota que está fuera de la wiki", not confirma(enviados[-1][1]))
+        respuesta["texto"] = accion(**dict(recuerdo, texto="Mi correo para la práctica es alguien@example.com"))
+        b.atender(mensaje("anota mi correo"), 1)
+        check("un recuerdo con un dato sensible no se ofrece", not confirma(enviados[-1][1]))
+        respuesta["texto"] = accion(**dict(recuerdo, texto="Otra cosa que no quiero guardar"))
+        b.atender(mensaje("algo más"), 1)
+        b.atender(boton_en("no", len(enviados)), 1)
+        check("con No no se guarda nada",
+              "Otra cosa" not in guardada.read_text(encoding="utf-8") and "no anoté nada" in enviados[-1][0])
 
         foto = {"photo": [{"file_id": "chica"}, {"file_id": "grande", "file_size": 1000}]}
         b.atender(mensaje(**foto), 1)
@@ -2921,7 +2903,8 @@ def probar_bot_de_telegram() -> None:
         check("a cualquier otro chat no le contesta", len(enviados) == antes)
     finally:
         (tg.enviar, tg.editar, tg.escribiendo, tg.responder_boton, tg.descargar,
-         b._preguntar, b.RUTA_ESTADO, ev.RUTA, od.COPIADOR, b.cargar_config, tg.quitar_botones) = originales
+         b._preguntar, b.RUTA_ESTADO, ev.RUTA, b.cargar_config, tg.cambiar_botones,
+         b.RUTA_OPINIONES) = originales
         shutil.rmtree(base, ignore_errors=True)
 
 
@@ -2944,6 +2927,7 @@ def probar_reuniones() -> None:
 
     analisis = {
         "titulo": "Entrevista grupal en Empresa Ejemplo", "tipo": "entrevista",
+        "una_linea": "Entrevista grupal de práctica en Empresa Ejemplo",
         "calidad_audio": "mala, el teléfono iba en el bolsillo",
         "resumen": "Entrevista grupal con Nombre Apellido, de selección.",
         "decisiones": [],
@@ -2952,7 +2936,14 @@ def probar_reuniones() -> None:
              "fecha": "2026-10-05", "hora": None, "lugar": None, "presencial": False,
              "cita": "mándame tu cv corregido el lunes"},
             {"que": "Algo que ya pasó", "quien": "el estudiante", "fecha": "2026-09-01"},
-            {"que": "Algo sin fecha", "quien": "Nombre Apellido", "fecha": None}],
+            {"que": "Algo sin fecha", "quien": "Nombre Apellido", "fecha": None},
+            {"que": "Llamar al gerente", "quien": "el estudiante", "fecha": "2026-10-06",
+             "cita": "una frase que nadie dijo en la entrevista"}],
+        "seguimientos": [
+            {"que": "Avisar si pasa a la segunda etapa", "quien": "la empresa", "cuando": "en una semana",
+             "fecha": None, "plazo_dias": 7, "cita": "te respondemos en una semana como mucho"},
+            {"que": "Mandar el contrato", "quien": "la empresa", "fecha": "2026-10-02",
+             "cita": "promesa que no aparece en la grabación"}],
         "preguntas_abiertas": ["Cuándo avisan el resultado"],
         "entrevista": {"preguntas": [{"pregunta": "Háblame de ti", "tu_respuesta": "Conté mi carrera",
                                       "como_mejorarla": "Partir por el logro principal"}],
@@ -2961,6 +2952,8 @@ def probar_reuniones() -> None:
                         "explicacion": "Es una caja de compensación.", "fuentes": ["conocimiento general"]}],
     }
     texto = f"bla bla\n{re_.MARCA_INICIO}\n{_json.dumps(analisis, ensure_ascii=False)}\n{re_.MARCA_FIN}\n"
+    transcripcion = ("hola a todos... mándame tu CV corregido el lunes, por favor. Y nosotros te "
+                     "respondemos en una semana como mucho.")
     check("lee el analisis entre las marcas", re_.extraer(texto)["titulo"] == analisis["titulo"])
     check("un analisis sin titulo o con JSON roto no se acepta",
           re_.extraer(texto.replace('"titulo"', '"otro"')) is None
@@ -2976,7 +2969,7 @@ def probar_reuniones() -> None:
     ev.guardar({"ramos": {}, "pendientes": []})
     try:
         datos = re_.extraer(texto)
-        nota, docx = re_.guardar(datos, "2026-09-29", "Entrevista grupal.m4a", config)
+        nota, docx = re_.guardar(datos, "2026-09-29", "Entrevista grupal.m4a", config, transcripcion)
         md = nota.read_text(encoding="utf-8")
         check("deja la nota en Reuniones/ de la boveda, con el nombre de la persona",
               nota.parent.name == "Reuniones" and nota.name.startswith("Reunión - 2026-09-29")
@@ -2988,13 +2981,28 @@ def probar_reuniones() -> None:
         check("y un .docx en la carpeta de OneDrive",
               docx.parent == base / "OneDrive" and doc.paragraphs[0].text == analisis["titulo"])
         pendientes = ev.cargar()["pendientes"]
-        check("solo la accion con fecha futura queda para la secretaria",
-              [p["fecha"] for p in pendientes] == ["2026-10-05"] and pendientes[0]["origen"] == "reunion")
-        _, docx2 = re_.guardar(datos, "2026-09-29", "Entrevista grupal.m4a", config)
-        check("repetirla no pisa el .docx ni duplica el pendiente",
-              docx2.name.endswith("(2).docx") and len(ev.cargar()["pendientes"]) == 1, docx2.name)
-        check("y avisa con el resumen y las acciones",
-              "Mandar el CV corregido" in avisos[0][1] and avisos[0][2] == docx)
+        acciones = [p for p in pendientes if p.get("tipo") != "seguimiento"]
+        check("solo la accion con fecha futura y cita en la grabacion queda para la secretaria",
+              [p["fecha"] for p in acciones] == ["2026-10-05"] and acciones[0]["origen"] == "reunion",
+              str(acciones))
+        seguimientos = [p for p in pendientes if p.get("tipo") == "seguimiento"]
+        check("una promesa con plazo de la otra parte queda como seguimiento, con la fecha calculada",
+              [(p["fecha"], p["que"]) for p in seguimientos]
+              == [("2026-10-06", "Avisar si pasa a la segunda etapa (la empresa)")], str(seguimientos))
+        check("la accion sin cita en la grabacion queda en la nota marcada para verificar",
+              "Llamar al gerente" in md and "verifícala" in md)
+        _, docx2 = re_.guardar(re_.extraer(texto), "2026-09-29", "Entrevista grupal.m4a", config, transcripcion)
+        check("repetirla no pisa el .docx ni duplica los pendientes",
+              docx2.name.endswith("(2).docx") and len(ev.cargar()["pendientes"]) == 2, docx2.name)
+        aviso = avisos[0][1]
+        check("avisa con una linea de que fue, las acciones con fecha y los seguimientos",
+              aviso.startswith("📝 Entrevista grupal de práctica en Empresa Ejemplo")
+              and "Mandar el CV corregido - el estudiante, 05-10" in aviso
+              and "⏳ Seguimientos\n• Avisar si pasa a la segunda etapa - la empresa, 06-10" in aviso
+              and avisos[0][2] == docx, aviso)
+        check("sin afirmar lo que no tiene cita ni repetir el resumen largo",
+              "Llamar al gerente" not in aviso and "Mandar el contrato" not in aviso
+              and analisis["resumen"] not in aviso, aviso)
         texto9, _ = se.resumen(date(2026, 10, 5), ev.cargar(), config)
         check("el dia que toca, la secretaria lo recuerda como de una reunion",
               "de tus reuniones" in (texto9 or "") and "Mandar el CV corregido" in texto9, str(texto9))
@@ -3025,6 +3033,590 @@ def probar_reuniones() -> None:
               llamadas == [re_.RAMO], str(llamadas))
     finally:
         re_.CARPETA_DOCX, re_.notificar_reunion, ev.RUTA = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_seguimientos_de_reuniones() -> None:
+    """
+    El dia que vence una promesa de una reunion, la secretaria pregunta si se
+    cumplio, con Si (cierra), No (pospone una semana) y Descartar. Los botones los
+    atiende el bot, que es otro proceso. Telegram y el archivo son falsos.
+    """
+    print("\n== seguimientos de las reuniones ==")
+    from datetime import timedelta
+
+    from orquestador import bot as b
+    from orquestador import evaluaciones as ev
+    from orquestador import secretaria as se
+
+    base = Path(tempfile.mkdtemp(prefix="seguimientos_"))
+    enviados, cambios = [], []
+    tg = b.telegram
+    originales = (tg.enviar, tg.responder_boton, tg.cambiar_botones, ev.RUTA, b.RUTA_ESTADO, b.cargar_config)
+    tg.enviar = lambda texto, chat_id=None, teclado=None: enviados.append((texto, teclado)) or {"message_id": len(enviados)}
+    tg.responder_boton = lambda *a: None
+    tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
+    ev.RUTA, b.RUTA_ESTADO, b.cargar_config = base / "evaluaciones.json", base / "estado.json", (lambda: {})
+    ev.guardar({"ramos": {}, "pendientes": []})
+    hoy = date(2036, 10, 6)
+
+    def tocar(dato, mid):
+        b.atender({"callback_query": {"id": "x", "data": dato,
+                                      "message": {"chat": {"id": 1}, "message_id": mid}}}, 1)
+
+    def pendiente(que):
+        return next(p for p in ev.cargar()["pendientes"] if p["que"] == que)
+
+    try:
+        for que, fecha in (("Avisar el resultado (la empresa)", "2036-10-06"),
+                           ("Mandar el contrato (la empresa)", "2036-10-04"),
+                           ("Llamar de vuelta (la empresa)", "2036-10-20")):
+            ev.anotar_pendiente("REUNIÓN", fecha, que, "reunion", clase="2036-09-29",
+                                reunion="Entrevista de práctica", tipo="seguimiento")
+        ev.anotar_pendiente("REUNIÓN", "2036-10-06", "Mandar el CV", "reunion", clase="2036-09-29",
+                            reunion="Entrevista de práctica")
+        preguntas = se.seguimientos(ev.cargar(), hoy)
+        check("pregunta por lo que vence hoy y por lo vencido sin respuesta, no por lo que viene",
+              [t.split("\n")[1] for t, _ in preguntas]
+              == ["• Mandar el contrato (la empresa)", "• Avisar el resultado (la empresa)"], str(preguntas))
+        botones = [x["text"] for fila in preguntas[0][1]["inline_keyboard"] for x in fila]
+        check("con los botones Sí, No y Descartar", botones == ["Sí", "No, pospón 1 semana", "Descartar"], str(botones))
+        texto, _ = se.resumen(hoy, ev.cargar(), {"rutas": {"output": str(base)}})
+        check("y no repite el seguimiento como tarea para hoy, pero si la accion",
+              "Avisar el resultado" not in (texto or "") and "Mandar el CV" in (texto or ""), str(texto))
+
+        datos_boton = lambda i, k: preguntas[i][1]["inline_keyboard"][0][k]["callback_data"]
+        tocar(datos_boton(1, 0), 10)
+        check("Sí cierra el seguimiento y le quita los botones al mensaje",
+              pendiente("Avisar el resultado (la empresa)")["estado"] == "hecho"
+              and cambios[-1] == (10, None) and "Cerrado" in enviados[-1][0], str(enviados[-1:]))
+        tocar(datos_boton(0, 1), 11)
+        check("No lo pospone una semana",
+              pendiente("Mandar el contrato (la empresa)")["fecha"] == "2036-10-11"
+              and "Lo pospongo" in enviados[-1][0], str(enviados[-1:]))
+        tocar(datos_boton(0, 2), 11)
+        check("un botón viejo de un seguimiento ya pospuesto no hace nada",
+              "ya no está abierto" in enviados[-1][0] and "estado" not in pendiente("Mandar el contrato (la empresa)"))
+        ev.anotar_pendiente("REUNIÓN", "2036-10-01", "Confirmar la fecha (la empresa)", "reunion",
+                            clase="2036-09-29", tipo="seguimiento")
+        vencido = ev.resolver_seguimiento(ev.clave_pendiente(pendiente("Confirmar la fecha (la empresa)")), "no",
+                                          hoy=date(2036, 10, 9))
+        check("uno que venció hace días se pospone una semana desde hoy, no desde su fecha",
+              vencido["fecha"] == (date(2036, 10, 9) + timedelta(days=7)).isoformat(), str(vencido))
+        p = pendiente("Llamar de vuelta (la empresa)")
+        tocar(f"seg:x:{ev.clave_pendiente(p)}", 12)
+        check("Descartar lo saca de la vista sin borrarlo",
+              pendiente("Llamar de vuelta (la empresa)")["estado"] == "descartado"
+              and "Llamar de vuelta" not in se.lista_pendientes(ev.cargar(), hoy))
+        textos = " ".join(t for t, _ in se.seguimientos(ev.cargar(), date(2036, 10, 30)))
+        check("y la secretaria ya no pregunta por lo cerrado ni por lo descartado",
+              "Avisar el resultado" not in textos and "Llamar de vuelta" not in textos
+              and "Mandar el contrato" in textos, textos)
+    finally:
+        tg.enviar, tg.responder_boton, tg.cambiar_botones, ev.RUTA, b.RUTA_ESTADO, b.cargar_config = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_memoria_en_la_wiki() -> None:
+    """
+    Un recuerdo confirmado queda en la wiki de la boveda con su formato: la pagina con
+    frontmatter y fuente, una linea en el indice y una entrada al final del registro.
+    Nunca borra, nunca toca una nota fuera de la wiki ni las paginas reservadas, y
+    rechaza un recuerdo con un dato sensible. La boveda es temporal.
+    """
+    print("\n== memoria en la wiki ==")
+    from orquestador import memoria as me
+
+    boveda = Path(tempfile.mkdtemp(prefix="boveda_"))
+    wiki = boveda / "Wiki"
+    (wiki / "Temas").mkdir(parents=True)
+    (boveda / "Reuniones").mkdir()
+    (boveda / "Reuniones" / "Reunión - 2036-10-01 - Entrevista.md").write_text("fuente", encoding="utf-8")
+    indice = ("---\ntags:\n  - wiki\n---\n\n# Índice - Wiki\n\n## Temas\n\n### Un ramo\n\n"
+              "- [[Elasticidad]] - cuanto cambia la demanda\n\n## Personas y organizaciones\n\n"
+              "- [[Empresa Antigua]] - ya estaba\n\n## Síntesis\n")
+    (wiki / "Índice - Wiki.md").write_text(indice, encoding="utf-8")
+    (wiki / "Registro - Wiki.md").write_text("# Registro - Wiki\n\n## [2036-10-01] ingesta | Algo\n\nNada.\n",
+                                             encoding="utf-8")
+    hoy = date(2036, 10, 14)
+    try:
+        ruta = me.guardar_recuerdo(boveda, {"pagina": "Empresa Ejemplo", "tipo": "entidad",
+                                            "texto": "Caja de compensación donde postulé a la práctica",
+                                            "fuente": "Reunión - 2036-10-01 - Entrevista"}, hoy)
+        pagina = ruta.read_text(encoding="utf-8")
+        check("crea la página en Personas y organizaciones con el formato de la wiki",
+              ruta == wiki / "Personas y organizaciones" / "Empresa Ejemplo.md"
+              and pagina.startswith("---\nfecha: 2036-10-14\ntipo: entidad\ntags:\n  - wiki\nfuentes:\n"
+                                    '  - "[[Reunión - 2036-10-01 - Entrevista]]"\n---\n')
+              and "## Lo que sabemos\n\n- Caja de compensación donde postulé a la práctica. "
+                  "([[Reunión - 2036-10-01 - Entrevista]])" in pagina
+              and "## Contradicciones y dudas" in pagina, pagina)
+        actual = (wiki / "Índice - Wiki.md").read_text(encoding="utf-8")
+        check("la anota en su sección del índice, sin tocar lo demás",
+              "- [[Empresa Antigua]] - ya estaba\n- [[Empresa Ejemplo]] - Caja de compensación" in actual
+              and "- [[Elasticidad]] - cuanto cambia la demanda" in actual, actual)
+        registro = (wiki / "Registro - Wiki.md").read_text(encoding="utf-8")
+        check("y deja una entrada al final del registro, con el prefijo de la wiki",
+              registro.startswith("# Registro - Wiki\n\n## [2036-10-01] ingesta | Algo")
+              and registro.rstrip().endswith("sacado de [[Reunión - 2036-10-01 - Entrevista]].")
+              and "## [2036-10-14] ingesta | Memoria confirmada por Telegram: Empresa Ejemplo" in registro, registro)
+
+        me.guardar_recuerdo(boveda, {"pagina": "empresa ejemplo", "tipo": "entidad",
+                                     "texto": "La segunda etapa es un caso grupal"}, date(2036, 10, 20))
+        pagina2 = ruta.read_text(encoding="utf-8")
+        check("un recuerdo nuevo de la misma página se agrega sin borrar lo anterior",
+              pagina2.count("- Caja de compensación donde postulé") == 1
+              and "- La segunda etapa es un caso grupal. (contado por Telegram el 20-10-2036)" in pagina2
+              and "actualizada: 2036-10-20" in pagina2 and pagina2.index("caso grupal") < pagina2.index("## Contradicciones"),
+              pagina2)
+        check("y no la repite en el índice",
+              (wiki / "Índice - Wiki.md").read_text(encoding="utf-8").count("[[Empresa Ejemplo]]") == 1)
+
+        me.guardar_recuerdo(boveda, {"pagina": "Costo de oportunidad: idea clave", "tipo": "tema",
+                                     "texto": "Lo que dejas de ganar por elegir otra opción"}, hoy)
+        actual = (wiki / "Índice - Wiki.md").read_text(encoding="utf-8")
+        check("un tema va a Temas, con un nombre que Obsidian admite, y en el índice antes de las secciones de ramo",
+              (wiki / "Temas" / "Costo de oportunidad idea clave.md").is_file()
+              and actual.index("[[Costo de oportunidad idea clave]]") < actual.index("### Un ramo"), actual)
+
+        antes = {p: p.read_text(encoding="utf-8") for p in boveda.rglob("*.md")}
+        rechazados = [
+            {"pagina": "Alguien", "tipo": "entidad", "texto": "Su correo es alguien@example.com"},
+            {"pagina": "Alguien", "tipo": "entidad", "texto": "Su RUT es 12.345.678-9"},
+            {"pagina": "Alguien", "tipo": "entidad", "texto": "Mi cuenta es la 00-000-00000-00"},
+            {"pagina": "Perfil de alguien", "tipo": "tema", "texto": "algo"},
+            {"pagina": "Índice - Wiki", "tipo": "tema", "texto": "algo"},
+            {"pagina": "Reunión - 2036-10-01 - Entrevista", "tipo": "entidad", "texto": "algo"},
+            {"pagina": "Algo", "tipo": "otra cosa", "texto": "algo"},
+            {"pagina": "Algo", "tipo": "tema", "texto": ""},
+        ]
+        fallaron = []
+        for r in rechazados:
+            try:
+                me.guardar_recuerdo(boveda, r, hoy)
+            except me.RecuerdoInvalido:
+                continue
+            fallaron.append(r)
+        check("rechaza datos sensibles, páginas reservadas, notas fuera de la wiki y recuerdos mal formados",
+              fallaron == [], str(fallaron))
+        check("y al rechazar no escribe nada",
+              antes == {p: p.read_text(encoding="utf-8") for p in boveda.rglob("*.md")})
+        check("un monto con puntos no es un dato sensible",
+              me.revisar({"pagina": "P&G", "tipo": "entidad", "texto": "Ahorró 10.000.000.000 de dólares"})["texto"]
+              .startswith("Ahorró"))
+    finally:
+        shutil.rmtree(boveda, ignore_errors=True)
+
+
+def probar_reunion_ofrece_memoria() -> None:
+    """
+    Al cerrar una reunion, se ofrece guardar en la wiki quien era la organizacion y que
+    se hablo, con la nota de la reunion como fuente. Lo guarda el bot solo si el
+    estudiante toca Si. Un recuerdo con un dato sensible ni se ofrece. Boveda, OneDrive,
+    Telegram y archivo de fechas son falsos.
+    """
+    print("\n== una reunion ofrece guardar en la memoria ==")
+    from orquestador import bot as b
+    from orquestador import evaluaciones as ev
+    from orquestador import reuniones as re_
+
+    base = Path(tempfile.mkdtemp(prefix="reunion_memoria_"))
+    wiki = base / "vault" / "Wiki"
+    wiki.mkdir(parents=True)
+    (wiki / "Índice - Wiki.md").write_text("# Índice - Wiki\n\n## Personas y organizaciones\n", encoding="utf-8")
+    (wiki / "Registro - Wiki.md").write_text("# Registro - Wiki\n", encoding="utf-8")
+    config = {"rutas": {"vault_obsidian": str(base / "vault"), "output": str(base / "Output")}}
+    ofertas, enviados, cambios = [], [], []
+    tg = b.telegram
+    originales = (re_.CARPETA_DOCX, re_.CARPETA_PROPUESTAS, re_.notificar_reunion, re_.notificar_memoria,
+                  ev.RUTA, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.RUTA_ESTADO, b.cargar_config)
+    re_.CARPETA_DOCX, re_.CARPETA_PROPUESTAS = base / "OneDrive", base / "propuestas"
+    re_.notificar_reunion = lambda *a: None
+    re_.notificar_memoria = lambda r, clave: ofertas.append((r, clave))
+    ev.RUTA, b.RUTA_ESTADO, b.cargar_config = base / "evaluaciones.json", base / "estado.json", (lambda: config)
+    tg.enviar = lambda texto, chat_id=None, teclado=None: enviados.append(texto) or {"message_id": len(enviados)}
+    tg.responder_boton = lambda *a: None
+    tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
+    ev.guardar({"ramos": {}, "pendientes": []})
+
+    def tocar(dato):
+        b.atender({"callback_query": {"id": "x", "data": dato, "message": {"chat": {"id": 1}, "message_id": 7}}}, 1)
+
+    try:
+        datos = {"titulo": "Entrevista de práctica", "resumen": "r", "decisiones": [], "acciones": [],
+                 "preguntas_abiertas": [], "investigar": [], "entrevista": None,
+                 "memoria": [
+                     {"pagina": "Empresa Ejemplo", "tipo_pagina": "entidad",
+                      "texto": "Caja de compensación. La entrevistadora de selección explicó que la práctica es en el área de datos"},
+                     {"pagina": "Empresa Ejemplo", "tipo_pagina": "entidad",
+                      "texto": "El contacto es alguien@example.com"}]}
+        nota, _ = re_.guardar(datos, "2036-10-01", "Entrevista.m4a", config, "transcripción")
+        check("ofrece guardar la organización, con la nota de la reunión como fuente",
+              len(ofertas) == 1 and ofertas[0][0]["pagina"] == "Empresa Ejemplo"
+              and ofertas[0][0]["fuente"] == nota.stem, str(ofertas))
+        check("y el recuerdo con un dato sensible ni se ofrece",
+              not any("example.com" in r["texto"] for r, _ in ofertas))
+        check("sin tocar el botón no se guarda nada", not (wiki / "Personas y organizaciones").exists())
+        clave = ofertas[0][1]
+        tocar(f"mem:si:{clave}")
+        pagina = wiki / "Personas y organizaciones" / "Empresa Ejemplo.md"
+        check("con Sí queda en la wiki, citando la nota de la reunión",
+              pagina.is_file() and f"[[{nota.stem}]]" in pagina.read_text(encoding="utf-8")
+              and "Guardado en tu memoria" in enviados[-1] and cambios[-1] == (7, None), str(enviados[-1:]))
+        tocar(f"mem:si:{clave}")
+        check("tocarlo de nuevo no lo guarda dos veces",
+              "ya no está vigente" in enviados[-1]
+              and pagina.read_text(encoding="utf-8").count("área de datos") == 2)  # resumen y viñeta
+        tocar("mem:si:../../etc")
+        check("una clave que no es de una propuesta no lee nada", "ya no está vigente" in enviados[-1])
+
+        ofertas.clear()
+        re_.guardar(dict(datos, titulo="Otra entrevista"), "2036-10-02", "Otra.m4a", config, "transcripción")
+        tocar(f"mem:no:{ofertas[0][1]}")
+        check("con No no se guarda nada",
+              "no guardé nada" in enviados[-1] and "[[Reunión - 2036-10-02" not in pagina.read_text(encoding="utf-8"))
+        ofertas.clear()
+        re_.guardar(dict(datos, titulo="En ensayo"), "2036-10-03", "x.m4a", dict(config, **{ensayo.CLAVE: True}),
+                    "transcripción")
+        check("en un ensayo no se ofrece nada", ofertas == [])
+    finally:
+        (re_.CARPETA_DOCX, re_.CARPETA_PROPUESTAS, re_.notificar_reunion, re_.notificar_memoria,
+         ev.RUTA, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.RUTA_ESTADO, b.cargar_config) = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_fecha_que_trae_el_audio() -> None:
+    """
+    Sin fecha en el nombre, la fecha de la clase sale de la que trae el propio audio y no
+    del archivo en disco, que en OneDrive es la hora de subida. El audio la trae en UTC, y
+    una clase vespertina aqui ya es el dia siguiente en UTC. Audios reales hechos con
+    ffmpeg, que es lo que usa el sistema para leerlos.
+    """
+    print("\n== la fecha que trae el audio ==")
+    import os
+    import shutil as _sh
+    from datetime import datetime as _dt
+
+    if not _sh.which("ffmpeg") or not _sh.which("ffprobe"):
+        print("  (sin ffmpeg en este Mac: se omite)")
+        return
+    base = Path(tempfile.mkdtemp(prefix="fecha_audio_"))
+    subida = _dt(2026, 10, 14, 13, 0).timestamp()
+
+    def audio(nombre, creacion=None):
+        ruta = base / nombre
+        extra = ["-metadata", f"creation_time={creacion}"] if creacion else ["-map_metadata", "-1"]
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", "0.2",
+                        "-c:a", "aac", *extra, str(ruta)], check=True)
+        os.utime(ruta, (subida, subida))  # como si OneDrive la hubiera bajado hoy
+        return ruta
+
+    try:
+        nota_de_voz = audio("Grabación nueva 3.m4a", "2026-10-08T00:30:00.000000Z")
+        grupos = deteccion.agrupar_por_fecha([nota_de_voz])
+        check("una nota de voz sin fecha en el nombre cae el día que se grabó, en la hora de este Mac",
+              list(grupos) == [date(2026, 10, 7)], str(grupos))
+        momento = deteccion.momento_de_grabacion(nota_de_voz)
+        check("y se sabe a qué hora empezó", momento is not None and (momento.hour, momento.minute) == (21, 30),
+              str(momento))
+        con_nombre = audio("Clase 06.10.26.m4a", "2026-10-08T00:30:00.000000Z")
+        check("la fecha del nombre sigue mandando", list(deteccion.agrupar_por_fecha([con_nombre])) == [date(2026, 10, 6)])
+        sin_nada = audio("Grabación nueva 4.m4a")
+        check("sin fecha en el nombre ni en el audio, queda la del archivo",
+              list(deteccion.agrupar_por_fecha([sin_nada])) == [date(2026, 10, 14)])
+        futura = audio("Grabación nueva 5.m4a", "2099-01-01T00:00:00.000000Z")
+        check("una fecha imposible en el audio no se cree", deteccion.momento_de_grabacion(futura) is None)
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_pregunta_de_ramo_por_telegram() -> None:
+    """
+    Una grabacion cuyo nombre dice el ramo y la fecha se procesa sin preguntar. Cualquier
+    otra duda se pregunta por Telegram con un boton por ramo, Reunion y No es una clase, y
+    la grabacion espera sin procesarse. La respuesta la anota el bot, y la corrida
+    siguiente la procesa. Se recuerda una sola vez. La ventana del Mac no aparece en
+    ningun camino. Telegram, Whisper y el lanzamiento del procesamiento son falsos.
+    """
+    print("\n== la pregunta de ramo va por Telegram ==")
+    import json
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    from orquestador import bot as b
+    import importlib.util
+
+    from orquestador import pregunta_ramo as pr
+    from orquestador import procesar_input as pi
+    from orquestador import transcripcion
+
+    base = Path(tempfile.mkdtemp(prefix="pregunta_ramo_"))
+    entrada = base / "Input"
+    entrada.mkdir()
+    config = {"rutas": {"input": str(entrada), "procesados": str(base / "Procesados"), "output": str(base / "Output")},
+              "semestre": {"fecha_inicio": "2026-08-03"},
+              "ramos": {"lunes": {"nombre": "MICROECONOMIA AVANZADA", "perfil_whisper": "es-chile"}},
+              "ramos_adicionales": {"REUNIÓN": {"perfil_whisper": "es-chile", "contexto": ""}}}
+
+    def trabajo(nombre, fecha, ramo_por_dia=None):
+        ruta = entrada / nombre
+        ruta.write_bytes(b"audio")
+        return {"clave": f"{fecha}|{nombre}", "fecha": fecha, "dia_semana": "lunes", "archivos": [str(ruta)],
+                "reconocido": ramo_por_dia is not None, "ramo": ramo_por_dia, "perfil_whisper": "es-chile",
+                "numero_clase": 1}
+
+    claro = trabajo("Microeconomia avanzada 05.10.26.m4a", "2026-10-05")
+    del_dia = trabajo("Grabación nueva 7.m4a", "2026-10-05", "MICROECONOMIA AVANZADA")
+    raro = trabajo("Audio 12.m4a", "2026-10-07")
+    trabajos = [claro, del_dia, raro]
+    avisos, transcritos, enviados, cambios, lanzados = [], [], [], [], []
+    telegram_ok = [True]
+    tg = b.telegram
+    originales = (pr.RUTA, tg.avisar, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.lanzar_procesamiento,
+                  b.RUTA_ESTADO, b.cargar_config, transcripcion.construir_trabajos,
+                  transcripcion.transcribir_trabajo, transcripcion.notificar_aviso, deteccion.TRABAJOS_EMITIDOS_PATH)
+    pr.RUTA = base / "preguntas.json"
+    tg.avisar = lambda texto, adjunto=None, teclado=None: telegram_ok[0] and (avisos.append((texto, teclado)) or True)
+    tg.enviar = lambda texto, chat_id=None, teclado=None: enviados.append(texto) or {"message_id": 1}
+    tg.responder_boton = lambda *a: None
+    tg.cambiar_botones = lambda mid, teclado=None, chat_id=None: cambios.append((mid, teclado))
+    b.lanzar_procesamiento = lambda: lanzados.append(1)
+    b.RUTA_ESTADO, b.cargar_config = base / "estado.json", (lambda: config)
+    transcripcion.construir_trabajos = lambda c: [dict(t) for t in trabajos]
+    transcripcion.transcribir_trabajo = lambda t, c: transcritos.append(Path(t["archivos"][0]).name) or "texto"
+    transcripcion.notificar_aviso = lambda *a: None
+    deteccion.TRABAJOS_EMITIDOS_PATH = base / "emitidos.json"
+    usar_dir_pendientes(base / "pendientes")
+
+    def tocar(dato):
+        b.atender({"callback_query": {"id": "x", "data": dato, "message": {"chat": {"id": 1}, "message_id": 5}}}, 1)
+
+    def botones(teclado):
+        return [x["text"] for fila in teclado["inline_keyboard"] for x in fila]
+
+    try:
+        transcripcion.procesar_pendientes(config)
+        check("con el ramo y la fecha en el nombre se procesa sin preguntar",
+              transcritos == ["Microeconomia avanzada 05.10.26.m4a"], str(transcritos))
+        check("lo demás se pregunta por Telegram, y espera sin procesarse",
+              len(avisos) == 2 and "Grabación nueva 7.m4a" not in transcritos and "Audio 12.m4a" not in transcritos)
+        texto, teclado = avisos[0]
+        check("con un botón por ramo, Reunión y No es una clase",
+              botones(teclado) == ["Microeconomia Avanzada", "Reunión", "No es una clase"], str(botones(teclado)))
+        check("y si el día sugiere un ramo, lo dice", "👉 Por el día, parece de Microeconomia Avanzada" in texto, texto)
+        check("la que espera queda marcada como esperando", pr.esperando(Path(del_dia["archivos"][0])))
+
+        transcripcion.procesar_pendientes(config)
+        check("una corrida siguiente no vuelve a preguntar", len(avisos) == 2)
+
+        id_del_dia = next(p["id"] for p in json.loads(pr.RUTA.read_text()).values() if "nueva 7" in p["clave"])
+        id_raro = next(p["id"] for p in json.loads(pr.RUTA.read_text()).values() if "Audio 12" in p["clave"])
+        tocar(f"grab:{id_del_dia}:1")
+        check("el bot anota la respuesta, quita los botones y relanza el procesamiento",
+              "como una reunión" in enviados[-1] and cambios[-1] == (5, None) and lanzados == [1]
+              and not pr.esperando(Path(del_dia["archivos"][0])), str(enviados[-1:]))
+        tocar(f"grab:{id_del_dia}:0")
+        check("tocar otro botón después no cambia la respuesta", "ya tiene respuesta" in enviados[-1] and lanzados == [1])
+
+        transcripcion.procesar_pendientes(config)
+        meta = [json.loads(m.read_text()) for m in (base / "pendientes").glob("*.json")]
+        check("la corrida siguiente la procesa con lo que respondió",
+              "Grabación nueva 7.m4a" in transcritos and any(m["ramo"] == "REUNIÓN" for m in meta), str(meta))
+
+        tocar(f"grab:{id_raro}:2")
+        transcripcion.procesar_pendientes(config)
+        check("No es una clase la transcribe sin tratarla como clase",
+              "Audio 12.m4a" in transcritos and (base / "Output" / "Sin clasificar").is_dir()
+              and not Path(raro["archivos"][0]).exists())
+        check("la ventana del Mac ya no existe en ningún camino",
+              importlib.util.find_spec("orquestador.pantalla_confirmacion") is None
+              and importlib.util.find_spec("orquestador.dialogo_no_reconocido") is None)
+
+        # Recordatorio: una vez, solo pasado el plazo, y no si la grabacion ya no esta.
+        tarde = trabajo("Grabación nueva 9.m4a", "2026-10-12")
+        trabajos[:] = [tarde]
+        transcripcion.procesar_pendientes(config)
+        antes = len(avisos)
+        check("no recuerda antes de tiempo", pr.recordar(_dt.now()) == 0)
+        check("pasado el plazo la recuerda una vez, con los mismos botones",
+              pr.recordar(_dt.now() + _td(hours=4)) == 1 and avisos[-1][0].startswith("⏰ Sigue esperando")
+              and botones(avisos[-1][1]) == botones(avisos[antes - 1][1]))
+        check("y no la vuelve a recordar", pr.recordar(_dt.now() + _td(hours=30)) == 0)
+
+        telegram_ok[0] = False
+        sin_red = trabajo("Grabación nueva 10.m4a", "2026-10-12")
+        trabajos[:] = [sin_red]
+        transcripcion.procesar_pendientes(config)
+        check("si la pregunta no se pudo enviar, no queda esperando una respuesta que no llegará",
+              not pr.esperando(Path(sin_red["archivos"][0])))
+
+        # Si lo unico en Input espera respuesta, la corrida termina sin avisar "copiando".
+        mac = []
+        orig_pi = (pi.lock.adquirir_no_bloqueante, pi.lock.liberar, pi.cargar_config, pi.notificar_aviso,
+                   pi.notificar_inicio, pi.estado_vivo.limpiar)
+        pi.lock.adquirir_no_bloqueante, pi.lock.liberar = (lambda: object()), (lambda f: None)
+        pi.cargar_config, pi.notificar_aviso = (lambda: config), (lambda t, m: mac.append(t))
+        pi.notificar_inicio, pi.estado_vivo.limpiar = (lambda n: mac.append("inicio")), (lambda: None)
+        try:
+            for audio in entrada.iterdir():  # solo queda la que espera respuesta
+                if audio.name != "Grabación nueva 9.m4a":
+                    audio.unlink()  # archivo de prueba en una carpeta temporal
+            pi.main()
+            silencio = list(mac)
+            pi.main(avisar_si_espera=True)
+        finally:
+            (pi.lock.adquirir_no_bloqueante, pi.lock.liberar, pi.cargar_config, pi.notificar_aviso,
+             pi.notificar_inicio, pi.estado_vivo.limpiar) = orig_pi
+        check("si todo espera respuesta, la corrida automática termina en silencio", silencio == [], str(silencio))
+        check("y un clic en la app dice que espera tu respuesta", mac == ["Esperando tu respuesta"], str(mac))
+    finally:
+        (pr.RUTA, tg.avisar, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.lanzar_procesamiento,
+         b.RUTA_ESTADO, b.cargar_config, transcripcion.construir_trabajos,
+         transcripcion.transcribir_trabajo, transcripcion.notificar_aviso, deteccion.TRABAJOS_EMITIDOS_PATH) = originales
+        usar_dir_pendientes(None)
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_ramo_propuesto_por_la_hora() -> None:
+    """
+    Si el nombre no dice el ramo, la hora en que empezo la grabacion se cruza con el
+    horario: si cae en una clase, se propone ese ramo con un primer boton para
+    confirmarlo. Si a esa hora no habia clase, la pregunta es la general. Nada se
+    procesa antes de la respuesta. Telegram y la hora del audio son falsos.
+    """
+    print("\n== el ramo se propone por la hora de grabacion ==")
+    import json
+    from datetime import datetime as _dt
+
+    from orquestador import pregunta_ramo as pr
+
+    base = Path(tempfile.mkdtemp(prefix="ramo_hora_"))
+    config = {"ramos": {"lunes": {"nombre": "MICROECONOMIA AVANZADA", "inicio": "19:00", "fin": "22:00"},
+                        "martes": {"nombre": "FINANZAS CORPORATIVAS", "inicio": "19:00", "fin": "22:00"}},
+              "ramos_adicionales": {"REUNIÓN": {}}}
+    horas = {}
+    avisos = []
+    originales = (pr.RUTA, pr.telegram.avisar, pr.deteccion.momento_de_grabacion)
+    pr.RUTA = base / "preguntas.json"
+    pr.telegram.avisar = lambda texto, adjunto=None, teclado=None: avisos.append((texto, teclado)) or True
+    pr.deteccion.momento_de_grabacion = lambda ruta: horas.get(Path(ruta).name)
+
+    def trabajo(nombre, fecha, momento):
+        horas[nombre] = momento
+        return {"clave": f"{fecha}|{nombre}", "fecha": fecha, "archivos": [str(base / nombre)],
+                "reconocido": True, "ramo": "MICROECONOMIA AVANZADA"}
+
+    def textos(teclado):
+        return [x["text"] for fila in teclado["inline_keyboard"] for x in fila]
+
+    try:
+        check("una grabación que empieza a las 18:40 de un lunes es de la clase del lunes",
+              pr.ramo_por_horario(_dt(2026, 10, 5, 18, 40), config) == "MICROECONOMIA AVANZADA")
+        check("una de las 13:00 no es de ninguna clase", pr.ramo_por_horario(_dt(2026, 10, 5, 13, 0), config) is None)
+
+        decisiones = pr.preguntar([trabajo("Grabación nueva 1.m4a", "2026-10-06", _dt(2026, 10, 6, 19, 10))], config)
+        texto, teclado = avisos[-1]
+        check("si la hora cae en una clase, propone ese ramo con un primer botón para confirmarlo",
+              "Empezó durante tu clase de Finanzas Corporativas" in texto
+              and textos(teclado)[0] == "✅ Sí, es de Finanzas Corporativas"
+              and textos(teclado)[1:] == ["Microeconomia Avanzada", "Reunión", "No es una clase"], str(textos(teclado)))
+        check("y no la procesa antes de la respuesta", decisiones == {})
+        id_ = json.loads(pr.RUTA.read_text())["2026-10-06|Grabación nueva 1.m4a"]["id"]
+        dato = teclado["inline_keyboard"][0][0]["callback_data"]
+        check("el botón de confirmar responde ese ramo",
+              pr.responder(id_, int(dato.split(":")[2]))["respuesta"] == {"que_hacer": "procesar", "ramo": "FINANZAS CORPORATIVAS"})
+
+        pr.preguntar([trabajo("Grabación nueva 2.m4a", "2026-10-05", _dt(2026, 10, 5, 13, 0))], config)
+        texto, teclado = avisos[-1]
+        check("si a esa hora no había clase, la pregunta es la general, sin sugerir el ramo del día",
+              "👉" not in texto and textos(teclado)[0] == "Microeconomia Avanzada", texto)
+
+        pr.preguntar([trabajo("Entrevista con la empresa.m4a", "2026-10-05", _dt(2026, 10, 5, 19, 30))], config)
+        check("un nombre que dice otra cosa no se propone como clase, aunque la hora calce", "👉" not in avisos[-1][0])
+    finally:
+        pr.RUTA, pr.telegram.avisar, pr.deteccion.momento_de_grabacion = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_vigilante_de_input_y_onedrive() -> None:
+    """
+    El vigilante toma lo que llega a la carpeta de grabaciones de OneDrive y lo que se
+    deja en Input, ademas de AirDrop. De OneDrive copia la grabacion completa a Input y
+    aparta el original, sin borrarlo. Una grabacion que sigue creciendo no se toma. En
+    Input solo dispara una corrida lo nuevo, nunca lo que ya fallo ni lo que espera una
+    respuesta. Carpetas temporales, y el procesamiento es falso.
+    """
+    print("\n== el vigilante toma Input y OneDrive ==")
+    import json
+
+    from orquestador import pregunta_ramo as pr
+    from orquestador import vigilar_descargas as vd
+
+    base = Path(tempfile.mkdtemp(prefix="vigilante_"))
+    entrada, nube, descargas = base / "Input", base / "Nube", base / "Descargas"
+    for c in (entrada, nube, descargas):
+        c.mkdir()
+    config = {"rutas": {"input": str(entrada), "grabaciones_onedrive": str(nube)}}
+    corridas = []
+    originales = (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
+                  vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.YA_TOMADAS,
+                  vd.time.sleep)
+    vd.YA_TOMADAS = base / "para borrar"
+    vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS = (lambda: config), descargas, 0
+    vd.procesar_input.main = lambda: corridas.append(sorted(p.name for p in entrada.iterdir()))
+    vd.lock.adquirir_bloqueante, vd.lock.liberar = (lambda: None), (lambda f: None)
+    deteccion.ESTADO_TAMANOS_PATH, pr.RUTA = base / "tamanos.json", base / "preguntas.json"
+    try:
+        (nube / "Clase del martes.m4a").write_bytes(b"audio completo")
+        (nube / "notas.txt").write_text("no es audio")
+        vd.main()
+        check("una grabación de OneDrive se copia entera a Input y se procesa",
+              (entrada / "Clase del martes.m4a").read_bytes() == b"audio completo"
+              and corridas == [["Clase del martes.m4a"]], str(corridas))
+        check("el original queda en archivos para borrar, no borrado, y lo demás no se toca",
+              (vd.YA_TOMADAS / "Clase del martes.m4a").is_file() and (nube / "notas.txt").is_file()
+              and not (nube / "Clase del martes.m4a").exists())
+
+        creciendo = nube / "Subiendo.m4a"
+        creciendo.write_bytes(b"a")
+        vd.time.sleep = lambda s: creciendo.write_bytes(creciendo.read_bytes() + b"mas")
+        vd.main()
+        vd.time.sleep = originales[-1]  # el sleep de verdad
+        check("una grabación que sigue creciendo no se toma",
+              creciendo.exists() and not (entrada / "Subiendo.m4a").exists())
+
+        corridas.clear()
+        vd.main()
+        check("cuando deja de crecer, se toma", corridas == [["Clase del martes.m4a", "Subiendo.m4a"]], str(corridas))
+
+        # Lo que vio la ultima corrida, como lo deja deteccion.actualizar_estables.
+        deteccion.actualizar_estables(entrada)
+        corridas.clear()
+        vd.main()
+        check("lo que ya estaba en Input en la corrida anterior no dispara otra (una clase que falló)",
+              corridas == [], str(corridas))
+
+        (entrada / "Dejada a mano.m4a").write_bytes(b"audio")
+        vd.main()
+        check("un audio dejado a mano en Input se procesa sin abrir la app",
+              len(corridas) == 1 and "Dejada a mano.m4a" in corridas[0], str(corridas))
+
+        corridas.clear()
+        (entrada / "Esperando.m4a").write_bytes(b"audio")
+        pr.RUTA.write_text(json.dumps({"k": {"archivos": [str(entrada / "Esperando.m4a")]}}))
+        deteccion.actualizar_estables(entrada)
+        (entrada / "Esperando.m4a").write_bytes(b"audio que cambio")
+        vd.main()
+        check("ni lo que espera una respuesta por Telegram", corridas == [], str(corridas))
+
+        sin_nube = {"rutas": {"input": str(entrada)}}
+        vd.cargar_config = lambda: sin_nube
+        vd.main()
+        check("sin carpeta de OneDrive configurada sigue funcionando", True)
+    finally:
+        (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
+         vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.YA_TOMADAS,
+         vd.time.sleep) = originales
         shutil.rmtree(base, ignore_errors=True)
 
 
@@ -3071,11 +3663,12 @@ def probar_enlace_de_calendario() -> None:
                  "acciones": [con_hora,
                               {"que": "Mandar el CV", "fecha": "2026-10-05", "evento": False},
                               {"que": "Llamada sin fecha", "fecha": None, "evento": True}]}
-        re_.guardar(datos, "2026-09-29", "Entrevista.m4a", config)
+        dicho = "y bueno nos vemos el jueves ocho a las diez entonces"
+        re_.guardar(datos, "2026-09-29", "Entrevista.m4a", config, dicho)
         check("solo el evento con fecha se ofrece para el calendario",
               [q for q, _ in eventos] == ["Segunda entrevista"], str(eventos))
         eventos.clear()
-        re_.guardar(datos, "2026-09-29", "Entrevista.m4a", dict(config, **{ensayo.CLAVE: True}))
+        re_.guardar(datos, "2026-09-29", "Entrevista.m4a", dict(config, **{ensayo.CLAVE: True}), dicho)
         check("en ensayo no ofrece eventos", eventos == [])
     finally:
         re_.CARPETA_DOCX, re_.notificar_reunion, re_.notificar_evento, ev.RUTA = originales

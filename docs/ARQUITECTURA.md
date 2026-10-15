@@ -17,8 +17,11 @@ Desde la raíz del repositorio, siempre con el Python 3.13 del instalador oficia
   real.
 - **Una sola prueba:**
   `$PY -c "import sys; sys.path.insert(0, 'tests'); import test_orquestador as t; t.probar_<nombre>(); print(t.fallos)"`
+- **Nombres indefinidos o sin usar:** `$PY -m ruff check --select F orquestador tests`. El hook
+  de commit lo corre sobre los `.py` del commit. Se instala con `$PY -m pip install ruff`.
 - **Salud del sistema** (rutas, Whisper, sesión de Claude): `$PY -m orquestador.verificar`.
-  Hace una llamada mínima al modelo.
+  Hace una llamada mínima al modelo por defecto y otra por cada modelo que el código pide por
+  nombre (`bot.MODELO`, `reuniones.MODELO`).
 - **Ensayo completo contra un sandbox**, sin tocar el vault ni mover audios:
   `$PY -m orquestador.ensayo [<slug>] [--conservar]`. Este sí gasta tokens.
 - **Procesar Input a mano**, lo mismo que hace el vigilante: `$PY -m orquestador.procesar_input`.
@@ -37,8 +40,10 @@ launchctl kickstart -k gui/$(id -u)/local.agente-estudio.bot
 
 `airdrop` y `secretaria` arrancan de cero en cada corrida, así que ya leen el código nuevo sin reiniciar nada.
 
-Los registros quedan en `orquestador/logs/`: `bot.log`, `errores.log` y `uso.jsonl`, con
-el consumo de cada llamada. El campo `sesion` de `uso.jsonl` lleva a la conversación
+Los registros quedan en `orquestador/logs/`: `bot.log`, `errores.log`, `uso.jsonl`, con
+el consumo de cada llamada, y `opiniones.jsonl`, con cada 👍/👎 sobre una respuesta del bot
+(pregunta, respuesta, sesión, voto y el motivo si lo dio). Cada línea es completa: para
+analizar, vale la última de cada `mensaje`. El campo `sesion` de `uso.jsonl` lleva a la conversación
 completa, en `~/.claude/projects/<carpeta del proyecto>/<sesion>.jsonl`. La última
 actividad queda en `Estado.txt`.
 
@@ -49,7 +54,7 @@ Tres LaunchAgents corren solos. Los instalan `launchd/instalar_vigilante.sh` y
 
 | LaunchAgent | Módulo | Cuándo corre |
 |---|---|---|
-| `local.agente-estudio.airdrop` | `vigilar_descargas` | Cuando llega un audio por AirDrop a Descargas, y cada 10 minutos |
+| `local.agente-estudio.airdrop` | `vigilar_descargas` | Cuando cambia Descargas (AirDrop), `Input/` o la carpeta `rutas.grabaciones_onedrive`, y cada 10 minutos. Si cambias esas rutas, vuelve a correr `launchd/instalar_vigilante.sh` |
 | `local.agente-estudio.bot` | `bot` | Siempre, esperando mensajes de Telegram |
 | `local.agente-estudio.secretaria` | `secretaria` | Todos los días a las 9:00. Si no hay nada que decir, no escribe |
 | `local.agente-estudio.grabadora` | `grabadora/Grabadora.app` | Siempre, como botón en la barra de menú para grabar reuniones on-line |
@@ -64,19 +69,28 @@ El camino de una clase:
    `sharingd`), lo mueve a `Input/` y llama a `procesar_input`, que toma el candado de
    `lock.py`.
 2. `deteccion` agrupa las grabaciones y resuelve el ramo: primero por el nombre del archivo,
-   y si no, por el día de la semana de `config.json`. `pantalla_confirmacion` muestra una
-   ventana que sigue sola a los 10 minutos.
+   y si no, por el día de la semana de `config.json`. `pregunta_ramo` decide si hace falta
+   preguntar: si el nombre dice el ramo y la fecha, no pregunta. Si no, pregunta por Telegram
+   con un botón por ramo, la grabación queda en `Input/` y el bot, al recibir el botón, anota
+   la respuesta y relanza `procesar_input --esperar`. La secretaria recuerda una vez lo que
+   sigue sin respuesta. La ventana del Mac (`pantalla_confirmacion`) ya no se llama.
 3. `transcripcion` importa `backend.transcriber` de Transcriptotem, que vive en OneDrive (ruta
    en `config.json`), y deja el texto en `orquestador/transcripciones_pendientes/`. Ese
    intermedio permite reintentar sin volver a transcribir.
 4. `finalizar_clase` encadena el resto: `skill_runner` (la skill escribe las notas en el
    vault de Obsidian), `revisor` en sesión aparte, la corrección, los anuncios y pedidos del
-   profesor hacia `evaluaciones.json`, `hoja_html`, el `archivado` del audio, la copia a
-   OneDrive y `hoja_evaluacion`. Una clase con `<slug>_skill.json` ya está escrita.
+   profesor hacia `evaluaciones.json`, `hoja_html`, el `archivado` del audio y su
+   publicación en `<carpeta del ramo>/Clases/` de OneDrive (audio comprimido movido,
+   transcripción y hoja copiadas, con el mismo nombre), y `hoja_evaluacion`. La carpeta de
+   cada ramo la declara `carpetas_onedrive` en `config.json`. `Procesados/` y `Output/`
+   quedan como sala de trabajo. Una clase con `<slug>_skill.json` ya está escrita.
 5. `notificaciones` avisa en el Mac y repite en Telegram solo los avisos finales.
 
 Una grabación con ramo `REUNIÓN` se desvía a `reuniones.py`. Deja una nota en `Reuniones/`
-del vault y un `.docx` en OneDrive, manda las acciones a los pendientes y ofrece un botón
+del vault y un `.docx` en OneDrive, con el audio comprimido y la transcripción al lado y con
+el mismo nombre, manda las acciones a los pendientes y las promesas con
+plazo de la otra parte como seguimientos (solo lo que tiene cita en la transcripción, que
+Python comprueba) y ofrece un botón
 que abre Google Calendar con el evento lleno.
 
 Datos de estado (cuáles quedan fuera de git lo dice `.gitignore`):
@@ -93,15 +107,28 @@ Datos de estado (cuáles quedan fuera de git lo dice `.gitignore`):
 - `orquestador/bot_estado.json`: la sesión del bot, que dura 3 horas, y la acción que espera
   confirmación con un botón. Para leer qué respondió el bot, toma su `session_id` y abre
   `~/.claude/projects/<carpeta del proyecto con guiones>/<session_id>.jsonl`. Las sesiones
-  anteriores están en `logs/uso.jsonl`, etapa `bot`, campo `sesion`.
+  anteriores están en `logs/uso.jsonl`, etapa `bot`, campo `sesion`. Guarda también las
+  últimas 20 respuestas, para que un 👍/👎 sepa a qué pregunta corresponde.
+- `orquestador/preguntas_grabaciones.json`: las grabaciones que esperan que el estudiante
+  diga de qué son (`pregunta_ramo`), con su respuesta cuando llega.
+- `orquestador/propuestas_memoria/`: lo que una reunión ofreció guardar en la wiki, un
+  archivo por oferta, marcado como respondido cuando se toca el botón.
+
+**Solo el bot escucha a Telegram.** Cuando otro proceso (el procesamiento, la secretaria, el
+cierre de una reunión) necesita una respuesta con botones, envía el mensaje y deja lo que
+espera en un archivo de estado. El bot recibe el botón y escribe la respuesta en ese mismo
+archivo. Si dos procesos pueden escribirlo, va con candado (`evaluaciones._modificando`, y
+el mismo patrón en `pregunta_ramo`). Si no, cada uno escribe en un momento distinto
+(`propuestas_memoria/`). Un botón nuevo sigue este patrón: no agregues otro proceso que
+lea `getUpdates`.
 
 Piezas del agente que viven fuera de este repo, con su propio respaldo:
 
 - `backend/transcriber.py` de Transcriptotem, en OneDrive (ruta en `config.json`). Sin git:
   git dentro de OneDrive se corrompe al sincronizar. Antes de cambiarlo, copia el archivo a
   `_herramientas/respaldos/` del contenedor.
-- En `_herramientas/` del contenedor, que tiene git local sin remote: el copiador de hojas a
-  OneDrive, el hook compartido de privacidad (`git-hooks/`), la auditoría de publicación
+- En `_herramientas/` del contenedor, que tiene git local sin remote: el hook compartido de
+  privacidad (`git-hooks/`), la auditoría de publicación
   y la carga de la lista privada del Llavero.
 
 Piezas que cruzan todo el sistema:

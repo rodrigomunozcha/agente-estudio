@@ -15,7 +15,7 @@ Nació el 29-09-2026 como copia de `orquestador-estudio`, que sigue intacto en
 |---|---|
 | Clase por AirDrop | El audio llega a Descargas y el agente lo procesa solo, sin clics |
 | Apuntes | Notas de Obsidian por clase: ideas centrales, preguntas con respuesta modelo, kit de repaso |
-| Hoja de la clase | Una hoja de repaso en HTML, copiada a OneDrive y enviada a Telegram |
+| Hoja de la clase | Una hoja de repaso en HTML, enviada a Telegram y guardada junto al audio y la transcripción en la carpeta Clases del ramo, en OneDrive |
 | Hoja de la evaluación | Una hoja por solemne o examen que junta las clases que entran, y se rehace con cada clase nueva |
 | Anuncios del profesor | Controles, tareas y fechas de evaluación que dijo en clase, anotados solo si la cita está en el audio |
 | Secretaria de las 9:00 | Lo que pidió el profesor para hoy, las evaluaciones de la semana, y cada solemne o control dos días antes, la víspera y el mismo día |
@@ -25,8 +25,13 @@ Nació el 29-09-2026 como copia de `orquestador-estudio`, que sigue intacto en
 ## Uso diario
 
 - **Una clase:** mándala por AirDrop. Te llega por Telegram cuando termina, en unos 25 a 45 minutos.
-- **Una clase sin AirDrop:** arrastra el audio encima de `boton_app/Procesar Clases.app`, o déjalo en `Input/` y haz doble clic en la app.
-- **Una reunión:** cuando la ventana de confirmación pregunte el ramo, elige `REUNIÓN`.
+- **Una clase sin AirDrop:** déjala en `Input/`, o guárdala desde el teléfono en la carpeta de
+  OneDrive de `rutas.grabaciones_onedrive`. Se procesa sola cuando el Mac está encendido. El
+  original de OneDrive pasa a `~/Documents/Claude Code/archivos para borrar/`, la carpeta común
+  de todo lo que puedes borrar, igual que los audios originales sin comprimir.
+- **Si el nombre no dice de qué es:** te pregunto por Telegram, con un botón por ramo, `Reunión` y
+  `No es una clase`. La grabación espera tu respuesta, y si no contestas te lo recuerdo una vez.
+  Con el ramo y la fecha en el nombre (`Microeconomía 05.10.26.m4a`) no pregunto nada.
 - **El bot:** escríbele en Telegram. El menú tiene `/hoy`, `/evaluaciones`, `/pendientes`, `/resumenhtmlparasolemne` y `/nuevaconversacion`.
 - **Si faltaste a una clase o cambió una fecha:** cuéntaselo al bot. Te pregunta con un botón antes de anotarlo.
 

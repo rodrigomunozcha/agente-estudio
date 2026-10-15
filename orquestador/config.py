@@ -1,6 +1,12 @@
 import json
 from pathlib import Path
 
+# Todo lo que el estudiante revisa y borra a mano va a una sola carpeta, comun a todos sus
+# proyectos, cada cosa en una subcarpeta que dice de donde viene (regla 2 del CLAUDE.md
+# global, pedido del 15-10-2026). Asi sabe siempre donde esta lo que puede borrar. Hasta
+# ese dia el agente apartaba en tres lugares distintos, uno de ellos dentro de OneDrive.
+CARPETA_PARA_BORRAR = Path.home() / "Documents/Claude Code/archivos para borrar"
+
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
 # Carpeta de los archivos intermedios entre etapas (<slug>.txt, <slug>.json,
@@ -26,17 +32,6 @@ def usar_dir_pendientes(ruta: Path | str | None) -> None:
     _dir_pendientes = Path(ruta) if ruta else PENDIENTES_DIR_POR_DEFECTO
 
 PERFILES_WHISPER_VALIDOS = ["es-chile", "es-spain", "es-neutro", "en", "acento-mixto"]
-
-# Etiquetas legibles para mostrar en el dialogo nativo (ver dialogo_no_reconocido.py)
-# cuando se agrega un ramo nuevo que no esta en la tabla dia->ramo (ej. un ramo
-# de intercambio en otro idioma).
-ETIQUETAS_PERFIL_WHISPER = {
-    "Español (Chile)": "es-chile",
-    "Español (España)": "es-spain",
-    "Español (neutro)": "es-neutro",
-    "Inglés": "en",
-    "Acento mixto (hablante no nativo)": "acento-mixto",
-}
 
 DIAS_SEMANA = ["lunes", "martes", "miercoles", "jueves", "viernes"]
 

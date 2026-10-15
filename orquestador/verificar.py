@@ -212,11 +212,11 @@ def _sesion_de_claude() -> None:
         _anotar(FALLA, "no se pudo comprobar la sesion de Claude", f"no carga {e.name}")
         return
 
-    async def preguntar() -> tuple[bool, str]:
+    async def preguntar(modelo: str | None = None) -> tuple[bool, str]:
         opciones = ClaudeAgentOptions(
             cwd=str(RAIZ), setting_sources=[], allowed_tools=[],
             permission_mode="bypassPermissions",
-            cli_path=str(RAIZ / "node_modules" / ".bin" / "claude"), max_turns=1,
+            cli_path=str(RAIZ / "node_modules" / ".bin" / "claude"), max_turns=1, model=modelo,
         )
         detalle = ""
         try:
@@ -239,8 +239,27 @@ def _sesion_de_claude() -> None:
     elif _es_sesion_caducada(detalle):
         _anotar(FALLA, "la sesion de Claude Code caduco",
                 "inicia sesion de nuevo con: node_modules/.bin/claude")
+        return
     else:
         _anotar(FALLA, "el modelo no responde", detalle[:80])
+        return
+
+    # Los modelos que el codigo pide por su nombre. El por defecto puede responder y
+    # uno de estos no, si el plan no lo incluye o cambio de nombre: el 15-10-2026 el
+    # analisis de reuniones paso a pedir Opus sin que nadie comprobara que el plan Pro
+    # lo acepta desde el SDK. Una llamada minima por modelo.
+    from .bot import MODELO as MODELO_BOT
+    from .reuniones import MODELO as MODELO_REUNIONES
+
+    for uso, modelo in (("el bot", MODELO_BOT), ("las reuniones", MODELO_REUNIONES)):
+        try:
+            responde, detalle = asyncio.run(preguntar(modelo))
+        except Exception as e:
+            responde, detalle = False, type(e).__name__
+        if responde:
+            _anotar(OK, f"modelo de {uso}: {modelo}")
+        else:
+            _anotar(FALLA, f"el modelo de {uso} ({modelo}) no responde", detalle[:80])
 
 
 def _icono_de_la_barra() -> None:
@@ -250,18 +269,6 @@ def _icono_de_la_barra() -> None:
     else:
         _anotar(AVISO, "falta el icono de la barra",
                 "se compila con: bash boton_app/compilar_apps.sh")
-
-
-def _ventana_de_confirmacion() -> None:
-    binario = RAIZ / "ventana_confirmacion" / "ConfirmarGrabaciones"
-    if binario.exists():
-        _anotar(OK, "pantalla que confirma el ramo")
-    else:
-        # Un aviso, no un error: sin la ventana el sistema pregunta igual, solo
-        # que de a una grabacion por vez y despues de transcribir cada una.
-        _anotar(AVISO, "falta la pantalla de confirmacion",
-                "se pregunta de a una por vez; se compila con: "
-                "bash boton_app/compilar_apps.sh")
 
 
 def _lista_de_datos_privados() -> None:
@@ -307,7 +314,6 @@ def main() -> int:
     print("\nLo que ves mientras trabaja")
     _notificaciones()
     _icono_de_la_barra()
-    _ventana_de_confirmacion()
 
     print("\nPrivacidad")
     _lista_de_datos_privados()

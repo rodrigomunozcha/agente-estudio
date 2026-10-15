@@ -27,12 +27,14 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from .config import CARPETA_PARA_BORRAR
+
 RUTA_POR_DEFECTO = Path(__file__).parent / "bitacora_actual.json"
 RESPALDOS_DIR = Path(__file__).parent / "respaldos_bitacora"
 
 # Adonde van los archivos nuevos de la carpeta del ramo cuando se deshace una
 # corrida. Se apartan y no se borran: ver fotografiar_carpeta.
-CARPETA_PARA_REVISAR = Path(__file__).resolve().parent.parent / "Para revisar y borrar"
+CARPETA_PARA_REVISAR = CARPETA_PARA_BORRAR / "Agente estudio - notas de corridas detenidas"
 
 # Tipos de cambio registrables.
 ARCHIVO_CREADO = "archivo_creado"
@@ -151,7 +153,7 @@ class Bitacora:
                     destino.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(archivo), str(destino / archivo.name))
                     apartados.append(archivo.name)
-            return [f"{n} se movio a Para revisar y borrar" for n in apartados]
+            return [f"{n} se movio a archivos para borrar" for n in apartados]
 
         if tipo == CARPETA_CREADA:
             carpeta = Path(cambio["ruta"])

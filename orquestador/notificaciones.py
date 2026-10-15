@@ -143,7 +143,7 @@ def notificar_exito(trabajo: dict, titulo_clase: str, ruta_documento: Path,
     _notificar(
         titulo="Clase procesada",
         subtitulo=f"{trabajo['ramo']} - {trabajo['fecha']}",
-        mensaje=titulo_clase + (" (la hoja ya está en OneDrive)" if en_onedrive else ""),
+        mensaje=titulo_clase + (" (ya está en la carpeta Clases del ramo)" if en_onedrive else ""),
         url_al_hacer_clic=_file_url(ruta_documento),
     )
     # Los avisos finales tambien van al iPhone, por si no se vieron en el Mac.
@@ -152,7 +152,7 @@ def notificar_exito(trabajo: dict, titulo_clase: str, ruta_documento: Path,
     f = trabajo["fecha"]
     telegram.avisar(f"📚 Clase procesada\n🏫 {ramo_legible(trabajo['ramo'])} · {f[8:10]}-{f[5:7]}\n"
                     f"📝 {titulo_clase}\n"
-                    + ("☁️ La hoja ya está en OneDrive\n" if en_onedrive else "")
+                    + ("☁️ Audio, transcripción y hoja ya están en la carpeta Clases del ramo\n" if en_onedrive else "")
                     + "📎 Te la adjunto aquí", ruta_documento)
 
 
@@ -183,6 +183,13 @@ def notificar_evento(que: str, cuando: str, url: str, lugar: str = "") -> None:
     _notificar(titulo="¿Lo agregas al calendario?", subtitulo=que, mensaje=cuando, url_al_hacer_clic=url)
     telegram.avisar(f"🗓️ ¿Lo agrego a tu calendario?\n📌 {que}\n🕙 {cuando}" + (f"\n📍 {lugar}" if lugar else ""),
                     teclado=telegram.boton_enlace("Agregar a Google Calendar", url))
+
+
+def notificar_memoria(recuerdo: dict, clave: str) -> None:
+    """Ofrece guardar en la wiki lo que salio de una reunion. Solo por Telegram: el boton
+    lo atiende el bot (bot.responder_memoria), y en el Mac no hay donde tocarlo."""
+    telegram.avisar(f"🧠 ¿Guardo esto de la reunión en tu memoria?\n📄 {recuerdo['pagina']}\n• {recuerdo['texto']}",
+                    teclado=telegram.botones([("Sí, guárdalo", f"mem:si:{clave}"), ("No", f"mem:no:{clave}")]))
 
 
 def notificar_aviso(titulo: str, mensaje: str) -> None:

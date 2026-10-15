@@ -28,8 +28,6 @@ osacompile -o "Configurar Sistema.app" ConfigurarSistema.applescript
 if command -v swiftc >/dev/null 2>&1; then
   echo "Compilando el icono de la barra de menu..."
   swiftc -O -o ../barra_menu/BarraEstado ../barra_menu/BarraEstado.swift
-  echo "Compilando la ventana de confirmacion..."
-  swiftc -O -o ../ventana_confirmacion/ConfirmarGrabaciones ../ventana_confirmacion/ConfirmarGrabaciones.swift
 
   # La grabadora va dentro de un .app y no como binario suelto: macOS niega el
   # microfono a un programa sin Info.plist que explique para que lo usa, y los
@@ -64,14 +62,13 @@ if command -v swiftc >/dev/null 2>&1; then
 EOF
   codesign --force -s - "$APP"
   ICONO="  - barra_menu/BarraEstado            (icono de progreso en la barra superior)
-  - ventana_confirmacion/ConfirmarGrabaciones  (pantalla que confirma el ramo antes de empezar)
   - grabadora/Grabadora.app           (boton para grabar reuniones on-line)"
 else
   echo "Aviso: swiftc no esta disponible, se omiten el icono de la barra de menu"
-  echo "       y la ventana de confirmacion. El sistema funciona igual: sin la"
-  echo "       ventana, el ramo dudoso se pregunta de a una grabacion por vez."
+  echo "       y la grabadora de reuniones. El pipeline funciona igual, solo sin"
+  echo "       senal visible mientras trabaja y sin el boton para grabar reuniones."
   echo "       swiftc se instala con: xcode-select --install"
-  ICONO="  (sin icono de barra ni ventana de confirmacion: falta swiftc)"
+  ICONO="  (sin icono de barra ni grabadora: falta swiftc)"
 fi
 
 echo

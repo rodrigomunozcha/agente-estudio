@@ -8,16 +8,17 @@ en el scan anterior (guardado en disco, no en memoria, porque cada clic es
 un proceso nuevo), y considera "estable" un archivo cuyo tamano no cambio
 entre dos scans seguidos.
 
-Nota sobre la fecha de referencia: se usa la fecha de MODIFICACION
-(mtime) del archivo, no la de creacion (birthtime). El estudiante pasa los
-audios por AirDrop al escritorio y de ahi a Input. El mtime refleja
-cuando termino de grabarse el audio y sobrevive copias y AirDrop de
-forma mas confiable que el birthtime, que en varios sistemas de
-archivos se resetea al momento de la copia.
+Nota sobre la fecha de referencia: manda la fecha escrita en el nombre. Si no
+hay, la que trae el propio audio en sus etiquetas (momento_de_grabacion), que
+viaja dentro del archivo. Solo al final la fecha de MODIFICACION (mtime), no la
+de creacion del archivo (birthtime), que en varios sistemas de archivos se
+resetea al copiar. El mtime sobrevive a AirDrop, pero no a OneDrive, donde es la
+hora de subida.
 """
 import json
 import re
-from datetime import date, datetime
+import subprocess
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import ramo_por_nombre
@@ -79,6 +80,46 @@ def _fecha_de_nombre_plausible(nombre: str) -> date | None:
     return fecha
 
 
+# Donde guarda cada grabadora el momento en que empezo a grabar. Las notas de voz del
+# iPhone usan creation_time, en UTC, y la etiqueta de QuickTime, con su zona horaria.
+_ETIQUETAS_DE_CREACION = ("com.apple.quicktime.creationdate", "creation_time", "date")
+
+
+def _etiquetas(archivo: Path) -> dict:
+    """Las etiquetas del audio, con ffprobe. Vacio si no se pueden leer (sin ffprobe, o
+    un formato que no las trae): la fecha cae al mtime, como antes."""
+    try:
+        salida = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags",
+                                 "-of", "json", str(archivo)], capture_output=True, text=True, timeout=20)
+        return {k.lower(): v for k, v in (json.loads(salida.stdout).get("format") or {}).get("tags", {}).items()}
+    except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
+        return {}
+
+
+def momento_de_grabacion(archivo: Path) -> datetime | None:
+    """Cuando empezo a grabarse, en la hora de este Mac, segun lo que trae el propio audio.
+
+    Viaja dentro del archivo, asi que sobrevive a AirDrop, a OneDrive y a una copia,
+    que si cambian el mtime: en OneDrive el mtime es la hora de subida. Viene en UTC, y
+    una clase vespertina aqui ya es el dia siguiente en UTC: sin pasarla a la hora
+    de este Mac, una clase del miercoles caeria en el jueves, y en el ramo del jueves.
+    """
+    tags = _etiquetas(archivo)
+    for clave in _ETIQUETAS_DE_CREACION:
+        valor = tags.get(clave)
+        if not valor:
+            continue
+        try:
+            momento = datetime.fromisoformat(valor.strip().replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if momento.tzinfo is not None:
+            momento = momento.astimezone().replace(tzinfo=None)
+        if FECHA_MINIMA_PLAUSIBLE <= momento.date() <= date.today() + timedelta(days=1):
+            return momento
+    return None
+
+
 def _resolver_fecha_archivo(archivo: Path) -> date:
     """
     La fecha escrita en el nombre manda sobre la del archivo.
@@ -94,12 +135,16 @@ def _resolver_fecha_archivo(archivo: Path) -> date:
     escribe el sistema de archivos y cambia con cada copia, AirDrop o traslado.
     Cuando los dos discrepan, el que sabe es el nombre.
 
-    El mtime sigue sirviendo cuando no hay fecha en el nombre, que es el caso
-    de las grabaciones con nombre generico.
+    Sin fecha en el nombre, manda la que trae el propio audio (momento_de_grabacion).
+    El mtime queda como ultimo recurso: en una grabacion que llega por OneDrive es la
+    hora de subida, no la de la clase (pedido del 14-10-2026, issue #1).
     """
     del_nombre = _fecha_de_nombre_plausible(archivo.name)
     if del_nombre is not None:
         return del_nombre
+    del_audio = momento_de_grabacion(archivo)
+    if del_audio is not None:
+        return del_audio.date()
 
     fecha_mtime = date.fromtimestamp(archivo.stat().st_mtime)
     if fecha_mtime >= FECHA_MINIMA_PLAUSIBLE:
@@ -180,7 +225,7 @@ def resolver_ramo_de_grabacion(
     """
     El ramo de una grabacion, mirando primero el nombre del archivo y despues
     el calendario. Devuelve None cuando no hay que asumir nada y corresponde
-    preguntar (ver dialogo_no_reconocido.py).
+    preguntar (ver pregunta_ramo.py).
 
     El orden importa y es el arreglo de un caso real: el dia de la semana no
     distingue la clase del miercoles de una reunion grabada el mismo miercoles,

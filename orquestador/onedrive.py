@@ -1,17 +1,20 @@
 """
-Todo lo que el agente hace con la carpeta del semestre en OneDrive:
-"<carpeta del semestre>/<ramo>/", la que declara el copiador de hojas.
+Todo lo que el agente hace con la carpeta de cada ramo en OneDrive.
 
 Es la carpeta que el estudiante mas mira. Ahi guarda todo lo de la intranet de
-la universidad, y la abre desde el iPhone con o sin el Mac. El agente hace dos
-cosas con ella: deja las hojas en "<ramo>/Creada por Claude/" y lee, con lista
-blanca, el material que sirve para la hoja de cada evaluacion.
+la universidad, y la abre desde el iPhone con o sin el Mac. El agente deja cada
+clase en "<ramo>/Clases/" (archivado.publicar_en_onedrive), las hojas de
+evaluacion en "<ramo>/Creada por Claude/", lo que el estudiante manda por el chat
+en "<ramo>/Bot de IA/", y lee, con lista blanca, el material que sirve para la
+hoja de cada evaluacion.
 
-La lista de carpetas de ramo no se repite aqui: sale de FUENTES del copiador
-comun de _herramientas, que es la unica lista para todos los proyectos del Mac.
+La carpeta de cada ramo la declara config.json en "carpetas_onedrive", como
+fuente unica (issue #1). Hasta el 14-10-2026 salia de FUENTES del copiador comun
+de _herramientas, que copiaba las hojas de clase a "Creada por Claude": las
+clases ahora viven en "Clases", junto a su audio y su transcripcion, y el
+copiador dejo de hacer falta aqui.
 """
 import hashlib
-import importlib.util
 import logging
 import os
 import re
@@ -19,10 +22,7 @@ import shutil
 import unicodedata
 from pathlib import Path
 
-from .ensayo import es_ensayo
-from .notificaciones import notificar_aviso
-
-COPIADOR = Path.home() / "Documents/Claude Code/_herramientas/copiar-html-ramos.py"
+CREADA_POR_CLAUDE = "Creada por Claude"
 
 # ponytail: tope por archivo para que una pauta enorme no se coma el prompt de
 # la hoja. Las pautas reales miden 5.000 a 10.000 caracteres (medido el
@@ -30,64 +30,23 @@ COPIADOR = Path.home() / "Documents/Claude Code/_herramientas/copiar-html-ramos.
 MAX_CARACTERES_POR_ARCHIVO = 20_000
 
 
-def _cargar_copiador():
-    spec = importlib.util.spec_from_file_location("copiar_html_ramos", COPIADOR)
-    modulo = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modulo)
-    return modulo
-
-
-def copiar_a_onedrive(ruta_hoja: Path, config: dict) -> Path | None:
-    """
-    Corre el copiador y comprueba que esta hoja quedo en OneDrive, buscandola
-    por contenido y no por nombre: el copiador nunca pisa, y si el nombre ya
-    estaba ocupado la deja como "nombre (2).html". Devuelve donde quedo, o None.
-
-    Nunca lanza. La clase ya esta en el vault y en Output, y una copia fallida
-    no puede costarla: se avisa y se sigue.
-    """
-    if es_ensayo(config):
-        return None  # un ensayo no puede dejar hojas de mentira en la carpeta real
-    try:
-        copiador = _cargar_copiador()
-        copiador.main()
-        huella = copiador.md5(ruta_hoja)
-        # samefile y no ==: las rutas con tildes pueden venir en dos formas
-        # Unicode distintas que el disco trata como la misma carpeta.
-        destinos = [copiador.SEMESTRE / ramo / copiador.DESTINO
-                    for ramo, origen, _ in copiador.FUENTES
-                    if Path(origen).is_dir() and Path(origen).samefile(ruta_hoja.parent)]
-        for destino in destinos:
-            for copia in destino.glob("*.html"):
-                if copiador.md5(copia) == huella:
-                    return copia
-        motivo = ("no apareció en la carpeta del ramo" if destinos else
-                  f"la carpeta {ruta_hoja.parent.name} no está en FUENTES del copiador")
-    except Exception as e:
-        motivo = f"{type(e).__name__}: {e}"
-    notificar_aviso(
-        "La hoja no llegó a OneDrive",
-        f"Quedó en Obsidian y en Output, pero no en tu carpeta del semestre ({motivo}).",
-    )
-    return None
-
-
-def copiar_pisando(ruta: Path, ramo: str) -> Path | None:
+def copiar_pisando(ruta: Path, ramo: str, config: dict) -> Path | None:
     """
     Copia una hoja por evaluacion a "<ramo>/Creada por Claude/", reemplazando la
     version anterior. Es la unica excepcion a la regla de no pisar, autorizada
     por el estudiante el 29-09-2026 para estas hojas: se rehacen despues de cada
-    clase, y con el copiador comun se acumularian "(2)", "(3)" que tendria que
-    borrar a mano. Quien llama solo la usa con una hoja que paso la validacion.
+    clase, y sin pisar se acumularian "(2)", "(3)" que tendria que borrar a
+    mano. Quien llama solo la usa con una hoja que paso la validacion. Van
+    separadas de las clases, que viven en "<ramo>/Clases/".
 
     Se escribe aparte y se reemplaza de una vez, para que OneDrive nunca
     sincronice una hoja a medio copiar. Nunca lanza: devuelve None si no pudo.
     """
     try:
-        carpeta = carpeta_del_ramo(ramo)
+        carpeta = carpeta_del_ramo(ramo, config)
         if carpeta is None or not carpeta.is_dir():
             return None
-        destino = carpeta / "Creada por Claude" / ruta.name
+        destino = carpeta / CREADA_POR_CLAUDE / ruta.name
         destino.parent.mkdir(exist_ok=True)
         temporal = destino.with_name(f".{destino.name}.tmp")
         shutil.copyfile(ruta, temporal)
@@ -101,13 +60,13 @@ def _nfc(texto: str) -> str:
     return unicodedata.normalize("NFC", texto)
 
 
-def carpeta_del_ramo(ramo: str) -> Path | None:
-    """La carpeta del ramo en OneDrive, buscando en FUENTES la entrada cuyo
-    origen es Output/<ramo>. None si el ramo no esta ahi (MIC, por ejemplo)."""
-    copiador = _cargar_copiador()
-    for nombre, origen, _ in copiador.FUENTES:
-        if _nfc(Path(origen).name) == _nfc(ramo):
-            return copiador.SEMESTRE / nombre
+def carpeta_del_ramo(ramo: str, config: dict) -> Path | None:
+    """La carpeta del ramo en OneDrive, segun "carpetas_onedrive" de config.json. None
+    si el ramo no la declara. Compara sin importar la forma Unicode de las tildes, que
+    puede venir distinta del disco y del archivo de configuracion."""
+    for nombre, ruta in (config.get("carpetas_onedrive") or {}).items():
+        if _nfc(nombre) == _nfc(ramo):
+            return Path(ruta).expanduser()
     return None
 
 
@@ -192,13 +151,13 @@ def _texto_pdf(ruta: Path) -> str:
         return ""  # un PDF danado se trata igual que uno escaneado: sin texto
 
 
-def leer_material(ramo: str, evaluacion: str, tipo: str, programa: str | None = None) -> list[dict]:
+def leer_material(ramo: str, evaluacion: str, tipo: str, programa: str | None, config: dict) -> list[dict]:
     """
     El material de OneDrive para la hoja de una evaluacion, ya en texto.
     Cada elemento: categoria, archivo, texto y sin_texto (un PDF escaneado no
     trae texto: se omite, y la hoja tiene que decir que no se pudo leer).
     """
-    carpeta = carpeta_del_ramo(ramo)
+    carpeta = carpeta_del_ramo(ramo, config)
     if carpeta is None or not carpeta.is_dir():
         return []
     material = []
