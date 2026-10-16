@@ -87,12 +87,12 @@ hallazgos, los mas graves primero. Para cada uno, se concreto sobre donde esta y
 que hay que hacer: quien te lee va a aplicar la correccion sin volver a leerlo
 todo.
 
-Ademas, califica la transcripcion misma de 1 a 10, aparte de las notas. Mira si
+Ademas, califica la transcripcion misma de 1 a 100, aparte de las notas. Mira si
 los terminos tecnicos del ramo salen bien escritos o deformados, si las frases
 quedan cortadas, si hay tramos que no se entienden y si hay lineas inventadas
-por el silencio ("Gracias." sueltos). 9 o 10: se entiende todo y los terminos
-salen bien. 6 a 8: se sigue la clase, con terminos deformados o tramos dudosos.
-5 o menos: hay partes de la clase que no se pueden recuperar.
+por el silencio ("Gracias." sueltos). 90 a 100: se entiende todo y los
+terminos salen bien. 60 a 89: se sigue la clase, con terminos deformados o
+tramos dudosos. 59 o menos: hay partes de la clase que no se pueden recuperar.
 
 Escribe en español claro y directo. Sin guion largo. Evita el punto y coma.
 """
@@ -123,7 +123,7 @@ def _construir_prompt(
         'RESULTADO_REVISION: {"veredicto": "aprobado" | "corregir", "hallazgos": '
         '[{"gravedad": "alta" | "media", "donde": "nota y seccion exacta", '
         '"problema": "que esta mal y por que", "correccion": "que hay que hacer"}], '
-        '"transcripcion": {"puntaje": 1 a 10, "motivo": "una frase con lo que mas pesa"}}\n\n'
+        '"transcripcion": {"puntaje": 1 a 100, "motivo": "una frase con lo que mas pesa"}}\n\n'
         'Usa "corregir" solo si hay al menos un hallazgo de gravedad alta. '
         'Si todo lo que encontraste es de gravedad media, el veredicto es "aprobado" '
         "y los hallazgos quedan igual en la lista, como registro."
@@ -159,13 +159,14 @@ def calidad_transcripcion(revision: dict | None) -> dict | None:
     sin modelo, contando palabras por minuto, frases cortas y "Gracias.", y no
     separaba la grabacion buena de la mala de la clase del 15-10-2026. Lo que
     las separaba eran los terminos tecnicos deformados, y eso solo lo ve un
-    lector. Si el valor no es un entero de 1 a 10, no se muestra nada.
+    lector. Si el valor no es un entero de 1 a 100, no se muestra nada.
+    Iba de 1 a 10 y el estudiante pidio 1 a 100 (16-10-2026).
     """
     t = (revision or {}).get("transcripcion")
     if not isinstance(t, dict):
         return None
     puntaje = t.get("puntaje")
-    if not isinstance(puntaje, int) or isinstance(puntaje, bool) or not 1 <= puntaje <= 10:
+    if not isinstance(puntaje, int) or isinstance(puntaje, bool) or not 1 <= puntaje <= 100:
         return None
     return {"puntaje": puntaje, "motivo": str(t.get("motivo") or "")[:200]}
 

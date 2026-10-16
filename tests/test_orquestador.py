@@ -1352,21 +1352,21 @@ def probar_puntaje_de_la_transcripcion_en_la_hoja() -> None:
     from orquestador import hoja_html as h, revisor
 
     linea = ('RESULTADO_REVISION: {"veredicto": "aprobado", "hallazgos": [], '
-             '"transcripcion": {"puntaje": 6, "motivo": "deforma nombres <tecnicos>"}}')
+             '"transcripcion": {"puntaje": 64, "motivo": "deforma nombres <tecnicos>"}}')
     calidad = revisor.calidad_transcripcion(revisor._parsear_revision(linea))
-    check("el puntaje sale de la revision", calidad == {"puntaje": 6, "motivo": "deforma nombres <tecnicos>"},
+    check("el puntaje sale de la revision", calidad == {"puntaje": 64, "motivo": "deforma nombres <tecnicos>"},
           str(calidad))
-    for malo in ({"puntaje": 15, "motivo": "x"}, {"puntaje": "siete", "motivo": "x"}, None, "8"):
+    for malo in ({"puntaje": 150, "motivo": "x"}, {"puntaje": 0, "motivo": "x"}, {"puntaje": "siete", "motivo": "x"}, None, "8"):
         check(f"un puntaje invalido ({malo}) no se muestra",
               revisor.calidad_transcripcion({"transcripcion": malo}) is None)
 
     trabajo = {"ramo": "X", "numero_clase": 1, "fecha": "2026-08-27"}
     doc = h.armar_documento(trabajo, "T", "<p>c</p>", "", calidad=calidad)
-    check("la hoja muestra el puntaje como guia", "6/10" in doc and "guía" in doc)
+    check("la hoja muestra el puntaje como guia", "64/100" in doc and "guía" in doc)
     check("y el motivo va escapado", "&lt;tecnicos&gt;" in doc and "<tecnicos>" not in doc)
     doc = h.armar_documento(trabajo, "T", "<p>c</p>", "")
     check("sin revision dice que no se pudo medir, no inventa un puntaje",
-          "no se pudo medir" in doc and "/10" not in doc)
+          "no se pudo medir" in doc and "/100" not in doc)
 
 
 def probar_hoja_se_sanea_y_queda_autocontenida() -> None:

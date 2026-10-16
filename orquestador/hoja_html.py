@@ -550,7 +550,7 @@ def _linea_calidad(calidad: dict | None) -> str:
         return ('<p class="leyenda"><b>Transcripción:</b> no se pudo medir su calidad '
                 "en esta clase.</p>")
     motivo = html.escape(calidad["motivo"], quote=True)
-    return (f'<p class="leyenda"><b>Transcripción: {calidad["puntaje"]}/10</b> '
+    return (f'<p class="leyenda"><b>Transcripción: {calidad["puntaje"]}/100</b> '
             f"(guía, no definitiva). {motivo}</p>")
 
 
