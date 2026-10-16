@@ -32,7 +32,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from . import estado_vivo, evaluaciones, onedrive
+from . import estado_vivo, evaluaciones, material_ramo, onedrive
 from .carpetas import resolver_carpeta_ramo
 from .config import cargar_config
 from .ensayo import es_ensayo
@@ -66,6 +66,11 @@ MINIMO_PALABRAS = 600
 MAX_CARACTERES_ENTRADA = 1_500_000
 
 _NOTA = re.compile(r"^Aprendizaje - Clase (\d{4}-\d{2}-\d{2}) - (.+)\.md$")
+
+# Como se nombra cada tipo de material, en la tarjeta y en el prompt.
+ROTULOS = {"programa": "programa del ramo", "enunciado": "enunciado o pauta del trabajo",
+           "evaluacion pasada": "pauta de un semestre anterior",
+           "lámina": "lámina del profesor", "ayudantía": "ayudantía"}
 
 
 def nombre_archivo(ramo: str, evaluacion: str) -> str:
@@ -116,10 +121,9 @@ def tarjeta_evaluacion(ev: dict, clases: list[tuple[str, str, str]], perdidas: l
                    "".join(f"<li>{e(_fecha_legible(p['fecha']))}: su materia no está en esta "
                            f"hoja.{duda}</li>" for p in perdidas), "</ul>"]
     if material:
-        rotulo = {"programa": "programa del ramo", "enunciado": "enunciado o pauta del trabajo",
-                  "evaluacion pasada": "de un semestre anterior"}
         partes += ['<span class="clave">Material de la carpeta del ramo</span><ul>',
-                   "".join(f"<li>{e(m['archivo'])} ({rotulo.get(m['categoria'], m['categoria'])})"
+                   "".join(f"<li>{e(m['archivo'])} ({ROTULOS.get(m['categoria'], m['categoria'])}"
+                           + (f", clase del {e(_fecha_legible(m['clase']))}" if m.get("clase") else "") + ")"
                            + (f". No se pudo leer: es escaneado.{duda}" if m["sin_texto"] else "")
                            + "</li>" for m in material), "</ul>"]
     return "".join(partes) + "</div>"
@@ -137,12 +141,11 @@ def _construir_prompt(ramo: str, ev: dict, tipo: str, clases: list[tuple[str, st
     for i, (fecha, titulo, texto) in enumerate(clases, start=1):
         partes += ["", f"===CLASE {i} DE {len(clases)}: {fecha} - {titulo}===", texto,
                    "===FIN DE LA CLASE==="]
-    rotulo = {"programa": "programa del ramo", "enunciado": "enunciado o pauta del trabajo",
-              "evaluacion pasada": "pauta de un semestre anterior"}
     for m in material:
         if not m["sin_texto"]:
-            partes += ["", f"===MATERIAL: {rotulo.get(m['categoria'], m['categoria'])} "
-                           f"({m['archivo']})===", m["texto"], "===FIN DEL MATERIAL==="]
+            clase = f", clase del {m['clase']}" if m.get("clase") else ""
+            partes += ["", f"===MATERIAL: {ROTULOS.get(m['categoria'], m['categoria'])} "
+                           f"({m['archivo']}{clase})===", m["texto"], "===FIN DEL MATERIAL==="]
     partes += ["", "Redacta la hoja de esta evaluación siguiendo tus instrucciones. Devuelve solo "
                    f"el HTML entre {MARCA_INICIO} y {MARCA_FIN}."]
     return "\n".join(partes)
@@ -184,6 +187,10 @@ async def generar(ramo: str, nombre: str, config: dict, datos: dict | None = Non
                                           (config.get("programas") or {}).get(ramo), config)
     except Exception:
         material = []  # sin OneDrive la hoja se arma igual, solo con las clases
+    # Las laminas y ayudantias de las clases que entran (ver material_ramo). Se
+    # comparan con las notas de todas las clases del ramo para asignarlas.
+    material += material_ramo.material_de_la_evaluacion(
+        ramo, config, {f: r.read_text(encoding="utf-8") for f, _, r in todas}, en_alcance)
     perdidas = [p for p in datos.get("clases_perdidas", [])
                 if p.get("ramo") == ramo and evaluaciones.clases_de(evs, nombre, [p.get("fecha", "")])]
 
@@ -218,7 +225,8 @@ async def generar(ramo: str, nombre: str, config: dict, datos: dict | None = Non
          if tipo == "trabajo" else
          f"Hoja de estudio de la evaluación. Junta las {len(clases)} clases que entran, con un "
          "hilo conductor entre ellas."),
-        "<b>CL</b> dicho en una de las clases que entran &nbsp;&middot;&nbsp; <b>PA</b> de una pauta "
+        "<b>CL</b> dicho en una de las clases que entran &nbsp;&middot;&nbsp; <b>MP</b> de una lámina "
+        "o ayudantía del profesor &nbsp;&middot;&nbsp; <b>PA</b> de una pauta "
         "de un semestre anterior &nbsp;&middot;&nbsp; <b>?</b> dudoso por audio o reconstruido, "
         "conviene verificar &nbsp;&middot;&nbsp; <b>+</b> agregado aquí, no se dijo en clase",
         tarjeta_evaluacion(ev, clases, perdidas, material),

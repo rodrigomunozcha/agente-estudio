@@ -17,8 +17,9 @@ Recibes:
 - Los datos de la evaluación: nombre, fecha, tipo y qué clases entran.
 - La nota de aprendizaje de cada clase que entra, en orden. Ya están revisadas contra la
   grabación.
-- A veces, material de la carpeta del ramo: el programa, pautas de evaluaciones de semestres
-  anteriores con el mismo número, o el enunciado de un trabajo.
+- A veces, material de la carpeta del ramo: el programa, las láminas y ayudantías del
+  profesor de las clases que entran, pautas de evaluaciones de semestres anteriores con el
+  mismo número, o el enunciado de un trabajo.
 
 ## Qué manda
 
@@ -31,6 +32,10 @@ Manda la materia vista en estas clases. El resto del material solo ayuda a estud
   Nunca digas ni insinúes que esas preguntas se van a repetir.
 - El programa sirve para ordenar los temas y ubicarlos en su unidad, no para agregar materia
   que no se vio.
+- Las láminas y ayudantías son del profesor y de estas clases. Úsalas para escribir bien
+  fórmulas, definiciones y nombres, para completar lo que las notas marcan como dudoso por
+  audio y para tomar ejercicios de práctica. Lo que sale de ellas lleva la marca `MP`. Si
+  una lámina contradice lo que el profesor dijo en clase, manda la clase y dilo.
 - No escribas nombres de personas, correos ni RUT que aparezcan en el material.
 
 ## Marcas
@@ -38,6 +43,7 @@ Manda la materia vista en estas clases. El resto del material solo ayuda a estud
 - `<span class="f cl">CL</span>` aquí significa "dicho en una de las clases de esta
   evaluación". Si ayuda a estudiar, di en qué clase (por su fecha) dentro del texto, nunca
   dentro de la marca.
+- `<span class="f mp">MP</span>` sale de una lámina o una ayudantía del profesor.
 - `<span class="f pa">PA</span>` sale de una pauta de un semestre anterior.
 - `?` y `+` significan lo mismo que en la hoja de clase.
 

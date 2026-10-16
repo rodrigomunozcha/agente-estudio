@@ -35,14 +35,16 @@ y la segunda 0,45 y 0,41. Cuando no habia lamina de la clase, la mejor quedaba
 en 0,27 a 0,45 y empatada con la segunda. En la duda no va ninguna: una lamina
 de otra clase confunde mas de lo que ayuda.
 """
+import hashlib
 import math
 import re
 import unicodedata
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 from .config import dir_pendientes
-from .onedrive import _texto_pdf, carpeta_del_ramo
+from .onedrive import MAX_CARACTERES_POR_ARCHIVO, _texto_pdf, carpeta_del_ramo
 
 CARPETA_LAMINAS = "PPTs"
 PUNTAJE_MINIMO = 0.5
@@ -124,3 +126,118 @@ def linea_para_prompt(ruta: str) -> str:
         "como dicho en clase: si lo agregas, márcalo como aporte externo. Si la lámina no "
         "corresponde a lo que se vio, ignórala."
     )
+
+
+# --------------------------------------------------------------------------
+# Laminas y ayudantias para la hoja de una evaluacion
+# --------------------------------------------------------------------------
+#
+# La lamina de una clase casi nunca esta al procesarla: el profesor la sube en la
+# semana. Cuando se arma la hoja de una solemne o del examen, en cambio, ya estan
+# todas. Por eso ahi entran las laminas y las ayudantias de las clases de esa
+# evaluacion (pedido del estudiante el 16-10-2026).
+#
+# Lista blanca: solo estas carpetas, por su nombre exacto, sin subcarpetas. En
+# otras carpetas de los ramos hay un perfil de LinkedIn de una persona y libros
+# enteros (ver onedrive.elegir_archivos), y en la raiz puede haber de todo.
+CARPETAS_DEL_PROFESOR = {"ppts": "lámina", "ayudantias": "ayudantía"}
+
+# Bajo esto, un PDF no se parece a ninguna clase: no se asigna y no entra.
+# Calibrado el 16-10-2026 con las notas de cuatro ramos: las asignaciones
+# correctas dieron 0,24 a 0,48.
+PUNTAJE_MINIMO_CLASE = 0.2
+# Una fecha en el nombre cuenta si cae a menos de esto de una clase: el
+# profesor a veces la fecha el dia que la sube.
+DIAS_FECHA_EN_NOMBRE = 3
+
+
+def _sin_tildes(texto: str) -> str:
+    t = unicodedata.normalize("NFD", texto.lower())
+    return "".join(c for c in t if unicodedata.category(c) != "Mn")
+
+
+def _fecha_en_nombre(nombre: str, anio: int) -> date | None:
+    """2026.08.26, 26.08.26, 26-08-2026 o 27-08 (sin año, el de las clases). Un
+    numero que parece fecha y no lo es se descarta despues: tiene que caer
+    cerca de una clase real."""
+    m = re.search(r"(20\d\d)[._-](\d{1,2})[._-](\d{1,2})", nombre)
+    if m:
+        a, mes, dia = (int(x) for x in m.groups())
+    else:
+        m = re.search(r"(?<!\d)(\d{1,2})[.-](\d{1,2})(?:[.-](\d{2,4}))?(?!\d)", nombre)
+        if not m:
+            return None
+        dia, mes = int(m.group(1)), int(m.group(2))
+        a = int(m.group(3)) if m.group(3) else anio
+        a = a + 2000 if a < 100 else a
+    try:
+        return date(a, mes, dia)
+    except ValueError:
+        return None
+
+
+def asignar_a_clases(textos: dict[str, str], clases: dict[str, str]) -> dict[str, str | None]:
+    """
+    A que clase corresponde cada PDF: {nombre: fecha de la clase, o None}.
+    Primero la fecha del nombre, si cae cerca de una clase. Si no, la clase cuya
+    nota mas se le parece, pesando mas las palabras que estan en pocos PDF del
+    ramo. Calibrado el 16-10-2026: en cuatro ramos todas las laminas fechadas y
+    todas las de un ramo sin fechas cayeron en su clase.
+    """
+    if not clases:
+        return {n: None for n in textos}
+    fechas = sorted(clases)
+    anio = int(fechas[0][:4])
+    palabras_clase = {f: set(_palabras(t)) for f, t in clases.items()}
+    palabras_pdf = {n: set(_palabras(t)) for n, t in textos.items()}
+    en_cuantos = Counter(p for ps in palabras_pdf.values() for p in ps)
+    asignadas = {}
+    for nombre, palabras in palabras_pdf.items():
+        fecha = _fecha_en_nombre(nombre, anio)
+        if fecha:
+            cerca = [f for f in fechas if abs((date.fromisoformat(f) - fecha).days) <= DIAS_FECHA_EN_NOMBRE]
+            if cerca:
+                asignadas[nombre] = min(cerca, key=lambda f: abs((date.fromisoformat(f) - fecha).days))
+                continue
+        pesos = {p: math.log(1 + len(palabras_pdf) / en_cuantos[p]) for p in palabras}
+        total = sum(pesos.values())
+        if not total:
+            asignadas[nombre] = None
+            continue
+        puntaje, fecha_clase = max((sum(v for p, v in pesos.items() if p in palabras_clase[f]) / total, f)
+                                   for f in fechas)
+        asignadas[nombre] = fecha_clase if puntaje >= PUNTAJE_MINIMO_CLASE else None
+    return asignadas
+
+
+def material_de_la_evaluacion(ramo: str, config: dict, clases: dict[str, str],
+                              en_alcance: set[str]) -> list[dict]:
+    """
+    Las laminas y ayudantias de las clases que entran, con la forma de
+    onedrive.leer_material. `clases` es {fecha: texto de su nota} de todas las
+    clases del ramo, no solo las que entran: una lamina se asigna comparandola
+    con todas, y entra si su clase esta en `en_alcance`. Nunca lanza.
+    """
+    try:
+        carpeta = carpeta_del_ramo(ramo, config)
+        if carpeta is None or not carpeta.is_dir():
+            return []
+        candidatos = []
+        for sub in sorted(carpeta.iterdir()):
+            categoria = CARPETAS_DEL_PROFESOR.get(_sin_tildes(sub.name)) if sub.is_dir() else None
+            if categoria:
+                candidatos += [(categoria, p) for p in sorted(sub.glob("*.pdf"))]
+        textos, categorias, vistos = {}, {}, set()
+        for categoria, ruta in candidatos:
+            texto = _texto_pdf(ruta).strip()
+            huella = hashlib.md5(texto.encode()).hexdigest()
+            # Un escaneado no trae texto, y no se puede asignar a ninguna clase.
+            if texto and huella not in vistos and ruta.name not in textos:
+                vistos.add(huella)
+                textos[ruta.name], categorias[ruta.name] = texto, categoria
+        asignadas = asignar_a_clases(textos, clases)
+        return [{"categoria": categorias[n], "archivo": n, "texto": textos[n][:MAX_CARACTERES_POR_ARCHIVO],
+                 "sin_texto": False, "clase": f}
+                for n, f in asignadas.items() if f in en_alcance]
+    except Exception:
+        return []

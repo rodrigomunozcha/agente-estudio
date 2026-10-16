@@ -1246,6 +1246,65 @@ def probar_material_del_profesor() -> None:
     check("la skill sigue recibiendo su prompt", "Ramo: R" in skill_runner._construir_prompt("t", "R", "c", linea))
 
 
+def probar_laminas_en_la_hoja_de_evaluacion() -> None:
+    """
+    La hoja de una evaluacion se rehace cuando el profesor ya subio las laminas
+    de las clases que entran. Cada lamina o ayudantia se asigna a su clase (por
+    la fecha del nombre, o si no por parecido con la nota) y entran solo las de
+    las clases de esa evaluacion. Solo PPTs/ y Ayudantias/: nunca la raiz ni
+    otra carpeta del ramo.
+    """
+    print("\n== laminas y ayudantias en la hoja de evaluacion ==")
+    from orquestador import material_ramo as m
+
+    clases = {"2026-08-06": "introduccion regresion minimos cuadrados estimadores",
+              "2026-10-01": "variables dummy ancova igualdad coeficientes",
+              "2026-10-15": "supuestos residuos normalidad autocorrelacion heterocedasticidad"}
+    textos = {"clase-dummy.pdf": "variables dummy ancova trampa coeficientes",
+              "clase-supuestos.pdf": "supuestos normalidad residuos autocorrelacion",
+              "Ejercicio 15-10.pdf": "variables dummy ancova",
+              "2026.08.06_intro.pdf": "supuestos normalidad residuos",
+              "Clase-3-4.pdf": "minimos cuadrados estimadores regresion",
+              "nada que ver.pdf": "futbol cocina musica"}
+    asignadas = m.asignar_a_clases(textos, clases)
+    check("una lamina va a la clase con que mas se parece", asignadas["clase-dummy.pdf"] == "2026-10-01")
+    check("la fecha del nombre manda sobre el parecido (dd-mm sin año)",
+          asignadas["Ejercicio 15-10.pdf"] == "2026-10-15", str(asignadas))
+    check("y tambien con el año adelante", asignadas["2026.08.06_intro.pdf"] == "2026-08-06", str(asignadas))
+    check("'3-4' no es una fecha de clase: decide el parecido", asignadas["Clase-3-4.pdf"] == "2026-08-06")
+    check("lo que no se parece a ninguna clase no se asigna", asignadas["nada que ver.pdf"] is None)
+
+    tmp = Path(tempfile.mkdtemp(prefix="laminas_"))
+    ramo = tmp / "Ramo"
+    for carpeta in ("PPTs", "Ayudantias", "Profe", "Lecturas"):
+        (ramo / carpeta).mkdir(parents=True)
+    contenido = {"PPTs/clase-dummy.pdf": textos["clase-dummy.pdf"],
+                 "PPTs/copia-dummy.pdf": textos["clase-dummy.pdf"],
+                 "PPTs/clase-intro.pdf": clases["2026-08-06"],
+                 "Ayudantias/Ejercicio 15-10.pdf": textos["Ejercicio 15-10.pdf"],
+                 "Profe/perfil.pdf": textos["clase-dummy.pdf"],
+                 "Lecturas/libro.pdf": textos["clase-dummy.pdf"],
+                 "suelta-dummy.pdf": textos["clase-dummy.pdf"]}
+    for rel in contenido:
+        (ramo / rel).write_text("x")
+    leidos = []
+    original = m._texto_pdf
+    m._texto_pdf = lambda ruta: leidos.append(ruta.name) or contenido[str(ruta.relative_to(ramo))]
+    try:
+        material = m.material_de_la_evaluacion(
+            "RAMO", {"carpetas_onedrive": {"RAMO": str(ramo)}}, clases, {"2026-10-01", "2026-10-15"})
+        nombres = sorted(x["archivo"] for x in material)
+        check("entran la lamina y la ayudantia de las clases de la evaluacion, una vez cada una",
+              nombres == ["Ejercicio 15-10.pdf", "clase-dummy.pdf"], str(nombres))
+        check("con su categoria", {x["categoria"] for x in material} == {"lámina", "ayudantía"})
+        check("una lamina de otra evaluacion no entra", "clase-intro.pdf" not in nombres)
+        check("ni Profe, ni Lecturas, ni la raiz se abren",
+              not {"perfil.pdf", "libro.pdf", "suelta-dummy.pdf"} & set(leidos), str(leidos))
+    finally:
+        m._texto_pdf = original
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def probar_revision_fallida_no_dice_aprobado() -> None:
     """
     El revisor es la unica barrera antes de que el material entre al vault. Una

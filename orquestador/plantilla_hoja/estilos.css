@@ -53,6 +53,7 @@ img{max-width:100%}
 .f.mas{color:var(--violeta)}
 .f.duda{color:var(--rojo)}
 .f.pa{color:var(--azul)}
+.f.mp{color:var(--verde)}
 
 /* ---------- rejilla de tarjetas ---------- */
 .bloque{margin:20px 0 0}

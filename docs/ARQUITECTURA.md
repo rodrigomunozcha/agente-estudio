@@ -96,6 +96,8 @@ El camino de una clase:
    Antes de la skill, `material_ramo` deja en `<slug>_material.txt` el programa declarado
    en `programas` y, si calza con la clase, una lámina de `PPTs/`. Lo leen la skill y el
    revisor. El revisor además pone el puntaje de 1 a 100 que la hoja muestra arriba.
+   La hoja de evaluación suma las láminas de `PPTs/` y las ayudantías de `Ayudantias/` de las
+   clases que entran: cada PDF se asigna a su clase por la fecha del nombre o por parecido.
 5. `notificaciones` avisa en el Mac y repite en Telegram solo los avisos finales.
 
 Una grabación con ramo `REUNIÓN` se desvía a `reuniones.py`. Deja una nota en `Reuniones/`
