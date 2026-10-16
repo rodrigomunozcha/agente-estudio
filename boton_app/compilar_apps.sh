@@ -38,6 +38,7 @@ if command -v swiftc >/dev/null 2>&1; then
   APP=../grabadora/Grabadora.app
   mkdir -p "$APP/Contents/MacOS"
   swiftc -O -o "$APP/Contents/MacOS/Grabadora" ../grabadora/Grabadora.swift
+  "$APP/Contents/MacOS/Grabadora" --probar
   cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

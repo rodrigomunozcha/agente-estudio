@@ -67,6 +67,9 @@ ffmpeg y deja `Reunión Online DD.MM.YY - <tema>.m4a` en Input, donde lo toma el
 `ramo_por_nombre` reconoce el prefijo como REUNIÓN. Las pistas sueltas quedan en
 `archivos para borrar/Agente estudio - pistas de la grabadora/`. Se compila con
 `boton_app/compilar_apps.sh` y se instala con `bash launchd/instalar_grabadora.sh`.
+La pausa (solo en modo audio) deja de escribir sin cerrar nada, y los tramos se ubican
+en la mezcla con un cronómetro que descuenta las pausas. Cada 15 minutos de pausa avisa
+en el Mac y por Telegram. Su prueba es `Grabadora --probar`, que corre al compilar.
 
 El camino de una clase:
 

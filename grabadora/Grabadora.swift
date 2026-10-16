@@ -82,11 +82,30 @@ let ESPERA_CAMBIO_MICROFONO: TimeInterval = 1
 // estudiante escucho el volumen subir y bajar 5 a 7 veces (15-10-2026).
 let INTENTOS_CAMBIO_MICROFONO = 3
 
+// Cada cuanto recuerda que la grabacion sigue en pausa. Lo mas probable es
+// pausar en el recreo y olvidar reanudar: la clase siguiente se pierde entera.
+let SEGUNDOS_PARA_RECORDAR_PAUSA: TimeInterval = 15 * 60
+
+let PYTHON = "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
+
 func avisar(_ titulo: String, _ mensaje: String) {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
     p.arguments = ["-e", "on run argv", "-e", "display notification (item 2 of argv) with title (item 1 of argv)",
                    "-e", "end run", titulo, mensaje]
+    try? p.run()
+}
+
+// Copia al iPhone por Telegram, con el mismo modulo del pipeline, que sabe el
+// token (Llavero) y el chat. En un recreo uno no esta mirando el Mac. Sin bot
+// o sin red, telegram.avisar no hace nada y queda el aviso de macOS.
+func avisarAlTelefono(_ texto: String, raiz: URL) {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: PYTHON)
+    p.arguments = ["-c", "import sys; from orquestador.telegram import avisar; avisar(sys.argv[1])", texto]
+    p.currentDirectoryURL = raiz
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
     try? p.run()
 }
 
@@ -121,6 +140,66 @@ func exigir(_ estado: OSStatus, _ paso: String) throws {
     if estado != noErr { throw ErrorAudio(paso: "\(paso) (\(estado))") }
 }
 
+// MARK: - Cronometro
+
+/// Segundos grabados desde el inicio, sin contar las pausas. Al pausar no se
+/// cierra nada: cada pista deja de escribir y retoma en el mismo archivo, asi
+/// que la pausa no existe dentro de los archivos. Por eso los tramos se ubican
+/// en la mezcla con este cronometro y no con la hora, o quedarian corridos lo
+/// que duro la pausa. Se eligio cortar la pausa entera en vez de marcarla: el
+/// ruido del recreo solo le da a Whisper material para inventar frases.
+final class Cronometro {
+    let inicio: Date
+    private(set) var pausadoDesde: Date?
+    private var enPausas: TimeInterval = 0
+    // Es lo unico que leen los hilos de audio, para saltarse la escritura. Una
+    // carrera aqui solo mueve el corte un buffer (85 ms en el microfono), no
+    // vale un candado. pausadoDesde y enPausas los usa solo el hilo principal.
+    private(set) var pausado = false
+
+    init(inicio: Date = Date()) { self.inicio = inicio }
+
+    func pausar(_ ahora: Date = Date()) {
+        guard pausadoDesde == nil else { return }
+        pausadoDesde = ahora
+        pausado = true
+    }
+
+    func reanudar(_ ahora: Date = Date()) {
+        guard let desde = pausadoDesde else { return }
+        enPausas += ahora.timeIntervalSince(desde)
+        pausadoDesde = nil
+        pausado = false
+    }
+
+    func segundo(_ ahora: Date = Date()) -> Double {
+        ahora.timeIntervalSince(inicio) - enPausas - enEstaPausa(ahora)
+    }
+
+    func enEstaPausa(_ ahora: Date = Date()) -> Double {
+        pausadoDesde.map { ahora.timeIntervalSince($0) } ?? 0
+    }
+}
+
+// Se corre con `Grabadora --probar`, y compilar_apps.sh lo corre al compilar.
+// precondition y no assert: con -O, assert desaparece y la prueba pasaria siempre.
+func probarCronometro() {
+    let t0 = Date(timeIntervalSince1970: 0)
+    let c = Cronometro(inicio: t0)
+    precondition(c.segundo(t0 + 60) == 60)
+    c.pausar(t0 + 60)
+    precondition(c.segundo(t0 + 600) == 60, "en pausa el cronometro no avanza")
+    precondition(c.enEstaPausa(t0 + 600) == 540)
+    c.pausar(t0 + 700)  // pausar dos veces no reinicia la pausa
+    c.reanudar(t0 + 960)
+    precondition(c.segundo(t0 + 1000) == 100, "descuenta los 900 s de pausa")
+    c.reanudar(t0 + 1100)  // reanudar sin pausa no hace nada
+    c.pausar(t0 + 1100)
+    c.reanudar(t0 + 1200)
+    precondition(c.segundo(t0 + 1300) == 300, "dos pausas se suman")
+    print("Cronometro: OK")
+}
+
 // MARK: - Audio del sistema
 
 final class AudioSistema {
@@ -129,7 +208,7 @@ final class AudioSistema {
     private var proceso: AudioDeviceIOProcID?
     private var archivo: AVAudioFile?
 
-    func empezar(en url: URL) throws {
+    func empezar(en url: URL, cronometro: Cronometro) throws {
         let descripcion = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         descripcion.isPrivate = true
         descripcion.muteBehavior = .unmuted
@@ -159,7 +238,8 @@ final class AudioSistema {
                                       commonFormat: formato.commonFormat, interleaved: formato.isInterleaved)
         self.archivo = archivo
         try exigir(AudioDeviceCreateIOProcIDWithBlock(&proceso, agregado, nil) { _, entrada, _, _, _ in
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: formato, bufferListNoCopy: entrada) else { return }
+            guard !cronometro.pausado,
+                  let buffer = AVAudioPCMBuffer(pcmFormat: formato, bufferListNoCopy: entrada) else { return }
             try? archivo.write(from: buffer)
         }, "conectar la lectura")
         try exigir(AudioDeviceStart(agregado, proceso), "empezar")
@@ -184,14 +264,14 @@ final class AudioSistema {
 
 final class Microfono {
     private let carpeta: URL
-    private let inicio: Date
+    private let cronometro: Cronometro
     private var motor: AVAudioEngine?
     private var archivo: AVAudioFile?
     private(set) var tramos: [(url: URL, segundo: Double)] = []
 
-    init(carpeta: URL, inicio: Date) {
+    init(carpeta: URL, cronometro: Cronometro) {
         self.carpeta = carpeta
-        self.inicio = inicio
+        self.cronometro = cronometro
     }
 
     /// Cierra el tramo en curso y abre otro con el microfono activo ahora.
@@ -231,12 +311,15 @@ final class Microfono {
             return false
         }
         oyoAlgo = false
+        let cronometro = cronometro
         entrada.installTap(onBus: 0, bufferSize: 4096, format: formato) { [weak self] buffer, _ in
             guard let datos = buffer.floatChannelData?[0],
                   let unCanal = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: buffer.frameLength) else { return }
             unCanal.frameLength = buffer.frameLength
             unCanal.floatChannelData![0].update(from: datos, count: Int(buffer.frameLength))
-            try? archivo.write(from: unCanal)
+            // En pausa se sigue oyendo, solo no se escribe: asi el aviso de
+            // "sin voz" sigue valiendo para un tramo que se abre en la pausa.
+            if !cronometro.pausado { try? archivo.write(from: unCanal) }
             if self?.oyoAlgo == false, (0..<Int(buffer.frameLength)).contains(where: { datos[$0] != 0 }) {
                 self?.oyoAlgo = true
             }
@@ -251,7 +334,7 @@ final class Microfono {
         self.motor = motor
         self.archivo = archivo
         inicioTramo = Date()
-        tramos.append((url, Date().timeIntervalSince(inicio)))
+        tramos.append((url, cronometro.segundo()))
         registrar("tramo \(tramos.count) con \(AVCaptureDevice.default(for: .audio)?.localizedName ?? "?"), \(formato)")
         return true
     }
@@ -283,7 +366,10 @@ final class Microfono {
 
 final class Sesion {
     let carpeta: URL
-    let inicio = Date()
+    let cronometro = Cronometro()
+    var inicio: Date { cronometro.inicio }
+    // Cuantos recordatorios de la pausa en curso ya salieron.
+    var recordatoriosPausa = 0
     let conPantalla: Bool
     let sistema = AudioSistema()
     let microfono: Microfono
@@ -302,9 +388,9 @@ final class Sesion {
         self.conPantalla = conPantalla
         let sello = DateFormatter()
         sello.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        carpeta = CARPETA_PISTAS.appendingPathComponent("Grabadora \(sello.string(from: inicio))")
+        carpeta = CARPETA_PISTAS.appendingPathComponent("Grabadora \(sello.string(from: cronometro.inicio))")
         try FileManager.default.createDirectory(at: carpeta, withIntermediateDirectories: true)
-        microfono = Microfono(carpeta: carpeta, inicio: inicio)
+        microfono = Microfono(carpeta: carpeta, cronometro: cronometro)
     }
 }
 
@@ -359,7 +445,20 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
     private func dibujar() {
         let menu = NSMenu()
         if let sesion {
-            let s = Int(Date().timeIntervalSince(sesion.inicio))
+            let s = Int(sesion.cronometro.segundo())
+            if sesion.cronometro.pausado {
+                recordarPausa(sesion)
+                item.button?.image = nil
+                item.button?.title = String(format: "❚❚ %d:%02d", s / 60, s % 60)
+                item.button?.contentTintColor = .systemOrange
+                menu.addItem(linea("En pausa: no se graba nada"))
+                menu.addItem(linea("El Mac sigue despierto hasta que reanudes"))
+                menu.addItem(.separator())
+                menu.addItem(boton("Reanudar", #selector(reanudar)))
+                menu.addItem(boton("Detener y procesar", #selector(detener)))
+                item.menu = menu
+                return
+            }
             let sinVoz = sesion.microfono.sinVoz
             // Sin tu voz, aparece un microfono tachado junto al contador y una
             // notificacion, una sola vez por cada vez que se pierde. Al principio
@@ -383,6 +482,10 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
                 menu.addItem(linea("Ajustes > Privacidad > Micrófono"))
             }
             menu.addItem(.separator())
+            // ponytail: con pantalla no hay pausa, porque SCRecordingOutput no
+            // tiene como pausar y el video quedaria mas largo que el audio. Si hace falta,
+            // cortar del video los mismos intervalos al armarlo con ffmpeg.
+            if !sesion.conPantalla { menu.addItem(boton("Pausar", #selector(pausar))) }
             menu.addItem(boton("Detener y procesar", #selector(detener)))
             menu.addItem(linea("Al detener, la reunión se procesa sola"))
         } else {
@@ -413,6 +516,38 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
     @objc private func grabarAudio() { Task { await empezar(conPantalla: false) } }
     @objc private func grabarPantalla() { Task { await empezar(conPantalla: true) } }
 
+    // En pausa todo sigue abierto (tap, micrófono, permiso sin reposo) y solo
+    // se deja de escribir. Así reanudar no rearma nada: si rearmar el tap
+    // fallara, se perdería justo la clase que sigue, y nadie lo vería hasta
+    // detener. No se probó que falle, se evitó el riesgo.
+    @objc private func pausar() {
+        guard let sesion else { return }
+        sesion.cronometro.pausar()
+        registrar("pausa en el segundo \(Int(sesion.cronometro.segundo()))")
+        dibujar()
+    }
+
+    @objc private func reanudar() {
+        guard let sesion else { return }
+        sesion.cronometro.reanudar()
+        sesion.recordatoriosPausa = 0
+        registrar("sigue en el segundo \(Int(sesion.cronometro.segundo()))")
+        dibujar()
+    }
+
+    // Uno cada 15 minutos de pausa, no uno solo: el primero puede pasar de largo.
+    // Va en dibujar(), que corre cada segundo, para no sumar un segundo reloj.
+    private func recordarPausa(_ sesion: Sesion) {
+        let pausa = sesion.cronometro.enEstaPausa()
+        let debidos = Int(pausa / SEGUNDOS_PARA_RECORDAR_PAUSA)
+        guard debidos > sesion.recordatoriosPausa else { return }
+        sesion.recordatoriosPausa = debidos
+        let texto = "La grabadora lleva \(Int(pausa) / 60) minutos en pausa. Si la clase ya siguió, "
+            + "reanúdala desde la barra de menú del Mac."
+        avisar("Grabación en pausa", texto)
+        avisarAlTelefono(texto, raiz: raiz)
+    }
+
     // MARK: - Grabar
 
     @MainActor
@@ -426,9 +561,9 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         let conMicrofono = await AVCaptureDevice.requestAccess(for: .audio)
         guard let nueva = try? Sesion(conPantalla: conPantalla) else { return }
         do {
-            try nueva.sistema.empezar(en: nueva.audioSistema)
+            try nueva.sistema.empezar(en: nueva.audioSistema, cronometro: nueva.cronometro)
             nueva.sistemaOK = true
-            nueva.segundoSistema = Date().timeIntervalSince(nueva.inicio)
+            nueva.segundoSistema = nueva.cronometro.segundo()
         } catch {
             registrar("no se pudo grabar el audio del sistema: \(error)")
             nueva.sistema.detener()
@@ -658,6 +793,10 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
 // MARK: - Arranque
 
 let argumentos = CommandLine.arguments
+if argumentos.dropFirst().first == "--probar" {
+    probarCronometro()
+    exit(0)
+}
 guard argumentos.count > 1 else {
     FileHandle.standardError.write("Uso: Grabadora <raíz del proyecto>\n".data(using: .utf8)!)
     exit(1)
