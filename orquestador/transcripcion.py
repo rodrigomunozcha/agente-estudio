@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 from contextlib import contextmanager
 from datetime import date
 from difflib import SequenceMatcher
@@ -86,7 +87,10 @@ def transcribir_trabajo(trabajo: dict, config: dict) -> str:
             texto = _transcribir_archivo(transcribe, ruta_audio, perfil, contexto, duracion, detalle)
         # Con la medicion real, la estimacion de la proxima clase deja de
         # depender de una constante escrita a mano (ver uso.py).
-        registrar_transcripcion(trabajo.get("clave", "?"), duracion, time.monotonic() - comenzo)
+        # ponytail: una grabacion de dos pistas no se mide. Transcribe hasta dos
+        # canales, y su tiempo bajaria la velocidad estimada de las clases.
+        if not es_de_dos_pistas(ruta_audio):
+            registrar_transcripcion(trabajo.get("clave", "?"), duracion, time.monotonic() - comenzo)
         if len(archivos) > 1:
             texto = f"--- Parte {i} ({Path(ruta_audio).name}) ---\n{texto}"
         partes.append(texto)
@@ -159,16 +163,23 @@ def _borrar_carpeta_de_trozos(carpeta: Path) -> None:
 MARGEN_CORTE_SEGUNDOS = 60
 
 
-def _silencios(ruta_audio: str) -> list[float]:
-    """El punto medio de cada pausa. Tarda unos 4 s en una clase de dos horas."""
+def _pausas(ruta_audio: str, db: float, segundos: float) -> list[tuple[float, float]]:
+    """(inicio, fin) de cada silencio. Uno que sigue al final del audio termina
+    con el audio. Tarda unos 4 s en una clase de dos horas."""
     r = subprocess.run(
-        ["ffmpeg", "-v", "info", "-i", str(ruta_audio), "-af", "silencedetect=noise=-30dB:d=0.4",
+        ["ffmpeg", "-v", "info", "-i", str(ruta_audio), "-af", f"silencedetect=noise={db}dB:d={segundos}",
          "-f", "null", "-"],
         capture_output=True, text=True,
     )
-    inicios = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", r.stderr)]
+    inicios = [max(0.0, float(x)) for x in re.findall(r"silence_start: (-?[\d.]+)", r.stderr)]
     finales = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", r.stderr)]
-    return [(a + b) / 2 for a, b in zip(inicios, finales)]
+    duracion = estado_vivo.duracion_audio_segundos(ruta_audio) or 0
+    return list(zip(inicios, finales + [duracion] * (len(inicios) - len(finales))))
+
+
+def _silencios(ruta_audio: str) -> list[float]:
+    """El punto medio de cada pausa, para cortar ahi."""
+    return [(a + b) / 2 for a, b in _pausas(ruta_audio, -30, 0.4)]
 
 
 def elegir_cortes(silencios: list[float], duracion: float, trozo: float, margen: float) -> list[float]:
@@ -267,20 +278,23 @@ def _transcribir_verificando(transcribe, ruta_audio: str, perfil: str, contexto:
 # canal se transcribe aparte y cada frase dice si es tuya o de los demas. No
 # separa a los demas entre si, y no sirve para el iPhone, que graba un solo canal.
 
-PREFIJO_GRABADORA = "reunion online"
 MARCAS = ("[Grabado con la grabadora del Mac. \"Tú\" es el estudiante, por su micrófono. "
           "\"Otros\" es todo lo que sonó en la llamada: el profesor, los compañeros o la otra parte.]")
 # Con parlantes en vez de audifonos tu microfono capta la llamada. Una frase tuya
-# casi igual a una de los demas, a esta distancia en segundos, es ese eco.
+# casi igual a una de los demas, a esta distancia en segundos, es ese eco. Sin
+# calibrar con una reunion real todavia. Estuvo en 0,6 y la revision de codigo
+# del 16-10-2026 noto que borraba respuestas cortas de verdad: tu "Sí, claro que
+# sí." despues del "Sí, claro." de ellos. Con 0,8 el eco tiene que ser casi igual.
 SEGUNDOS_ECO = 5
-PARECIDO_ECO = 0.6
+PARECIDO_ECO = 0.8
 # Un microfono sin voz: la tapa cerrada da ceros (-91 dB) y una sala en silencio,
 # aun nivelada por la grabadora, no pasa de esto.
 DB_MINIMO_VOZ = -35.0
 
 
 def es_de_dos_pistas(ruta_audio: str) -> bool:
-    if not ramo_por_nombre.normalizar(Path(ruta_audio).name).strip().startswith(PREFIJO_GRABADORA):
+    if not ramo_por_nombre.normalizar(Path(ruta_audio).name).strip().startswith(
+            ramo_por_nombre.PREFIJO_REUNION_ONLINE):
         return False
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
                         "stream=channels", "-of", "csv=p=0", str(ruta_audio)], capture_output=True, text=True)
@@ -289,14 +303,9 @@ def es_de_dos_pistas(ruta_audio: str) -> bool:
 
 def _tramos_con_voz(ruta_audio: str) -> list[tuple[float, float]]:
     """(inicio, fin) de cada tramo con sonido: lo que queda entre los silencios."""
-    r = subprocess.run(["ffmpeg", "-v", "info", "-i", str(ruta_audio), "-af",
-                        f"silencedetect=noise={DB_MINIMO_VOZ}dB:d=0.5", "-f", "null", "-"],
-                       capture_output=True, text=True)
-    inicios = [float(x) for x in re.findall(r"silence_start: (-?[\d.]+)", r.stderr)]
-    finales = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", r.stderr)]
     duracion = estado_vivo.duracion_audio_segundos(ruta_audio) or 0
     tramos, desde = [], 0.0
-    for a, b in zip(inicios, finales + [duracion] * (len(inicios) - len(finales))):
+    for a, b in _pausas(ruta_audio, DB_MINIMO_VOZ, 0.5):
         if a > desde:
             tramos.append((desde, a))
         desde = b
@@ -343,10 +352,34 @@ def _capturando_segmentos():
         bt._texto_por_frases = original
 
 
+def emparejar(segmentos: list[tuple[float, float, str]], texto: str,
+              desde: float) -> list[tuple[float, float, str]]:
+    """
+    Las frases del texto limpio, con su tiempo. Cada linea del texto se empareja
+    con un segmento de Whisper, contando: si el filtro de alucinaciones dejo dos
+    "Gracias." de cinco, entran dos. Se comparaba con un conjunto y volvian los
+    cinco (revision de codigo del 16-10-2026). Si no se capturo ningun segmento,
+    el texto entra igual, todo con el tiempo de inicio del trozo: perder el orden
+    fino es mucho menos que perder lo dicho.
+    """
+    if not segmentos:
+        return [(desde, desde, f) for f in texto.splitlines() if f.strip()]
+    quedan = Counter(texto.splitlines())
+    frases = []
+    for i, fin, f in segmentos:
+        if quedan[f] > 0:
+            quedan[f] -= 1
+            frases.append((desde + i, desde + fin, f))
+    return frases
+
+
 def _transcribir_con_tiempos(transcribe, ruta_audio: str, perfil: str, contexto: str,
                              duracion: float | None, verificar: bool) -> list[tuple[float, float, str]]:
     """(inicio, fin, frase) de un canal, cortado en trozos si es largo. Solo las
-    frases que sobrevivieron al filtro de alucinaciones de Transcriptotem."""
+    frases que sobrevivieron al filtro de alucinaciones de Transcriptotem. Con
+    `verificar`, un trozo vacio se reintenta una vez, como en una clase, pero si
+    vuelve vacio se sigue: la verificacion que manda es la del texto final de los
+    dos canales (ver transcribir_dos_pistas)."""
     temporal = Path(tempfile.mkdtemp(prefix=PREFIJO_TROZOS))
     try:
         largo = duracion and duracion > UMBRAL_PARTIR_SEGUNDOS
@@ -355,12 +388,14 @@ def _transcribir_con_tiempos(transcribe, ruta_audio: str, perfil: str, contexto:
         for trozo in trozos:
             with _capturando_segmentos() as segmentos:
                 if verificar:
-                    texto = _transcribir_verificando(transcribe, str(trozo), perfil, contexto,
-                                                     estado_vivo.duracion_audio_segundos(trozo))
+                    try:
+                        texto = _transcribir_verificando(transcribe, str(trozo), perfil, contexto,
+                                                         estado_vivo.duracion_audio_segundos(trozo))
+                    except ValueError:
+                        texto = ""
                 else:
                     texto, _, _ = transcribe(str(trozo), language_profile=perfil, context_text=contexto)
-            limpias = set(texto.splitlines())
-            frases += [(desde + i, desde + fin, f) for i, fin, f in segmentos if f in limpias]
+            frases += emparejar(segmentos, texto, desde)
             desde += estado_vivo.duracion_audio_segundos(trozo) or 0
         return frases
     finally:
@@ -384,10 +419,12 @@ def mezclar_por_tiempo(tu: list[tuple[float, str]], otros: list[tuple[float, str
 def transcribir_dos_pistas(transcribe, ruta_audio: str, perfil: str, contexto: str,
                            duracion: float | None, etiqueta: str) -> str:
     """
-    Separa los canales y transcribe cada uno. La llamada se verifica como
-    cualquier clase: si sale vacia, es un error. Tu microfono no, porque puede
-    estar mudo toda la reunion. Si no tiene voz, ni se transcribe y el texto
-    sale como antes, sin marcas.
+    Separa los canales y transcribe cada uno. Lo que se verifica es el texto
+    final de los dos juntos, no la llamada sola: en una entrevista donde hablas
+    tu y la llamada casi calla, verificar solo la llamada perdia la grabacion
+    entera (revision de codigo del 16-10-2026). Si tu microfono no tiene voz, ni
+    se transcribe y el texto sale como antes, sin marcas. En los dos canales
+    entran solo las frases que caen donde hay sonido.
 
     ponytail: tu canal se transcribe entero aunque hables poco, lo que suma el
     tiempo de Whisper de todo el audio. Si molesta, transcribir solo los tramos
@@ -402,17 +439,18 @@ def transcribir_dos_pistas(transcribe, ruta_audio: str, perfil: str, contexto: s
                             "-c:a", "aac", "-b:a", "96k", str(canales[nombre]), "-y"],
                            check=True, capture_output=True)
         notificar_progreso(estado_vivo.PASO_TRANSCRIBIR, f"{etiqueta}, lo que sonó en la llamada")
-        otros = [(i, f) for i, _, f in
-                 _transcribir_con_tiempos(transcribe, str(canales["otros"]), perfil, contexto, duracion, True)]
+        otros = frases_con_voz(
+            _transcribir_con_tiempos(transcribe, str(canales["otros"]), perfil, contexto, duracion, True),
+            _tramos_con_voz(str(canales["otros"])))
         tu = []
         if _tiene_voz(str(canales["tu"])):
             notificar_progreso(estado_vivo.PASO_TRANSCRIBIR, f"{etiqueta}, tu micrófono")
             tu = frases_con_voz(
                 _transcribir_con_tiempos(transcribe, str(canales["tu"]), perfil, contexto, duracion, False),
                 _tramos_con_voz(str(canales["tu"])))
-        if not tu:
-            return "\n".join(f for _, f in otros)
-        return mezclar_por_tiempo(tu, otros)
+        texto = mezclar_por_tiempo(tu, otros) if tu else "\n".join(f for _, f in otros)
+        _verificar_parte(texto.removeprefix(MARCAS), ruta_audio, duracion)
+        return texto
     finally:
         _borrar_carpeta_de_trozos(temporal)
 

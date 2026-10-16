@@ -17,9 +17,10 @@ Recibes:
 - Los datos de la evaluación: nombre, fecha, tipo y qué clases entran.
 - La nota de aprendizaje de cada clase que entra, en orden. Ya están revisadas contra la
   grabación.
-- A veces, material de la carpeta del ramo: el programa, las láminas y ayudantías del
-  profesor de las clases que entran, pautas de evaluaciones de semestres anteriores con el
-  mismo número, o el enunciado de un trabajo.
+- A veces, material de la carpeta del ramo: el programa, las láminas, ayudantías y código R
+  del profesor de las clases que entran, pautas de evaluaciones de semestres anteriores con
+  el mismo número, controles anteriores (si la evaluación es un control) o el enunciado de un
+  trabajo.
 
 ## Qué manda
 
@@ -36,6 +37,9 @@ Manda la materia vista en estas clases. El resto del material solo ayuda a estud
   fórmulas, definiciones y nombres, para completar lo que las notas marcan como dudoso por
   audio y para tomar ejercicios de práctica. Lo que sale de ellas lleva la marca `MP`. Si
   una lámina contradice lo que el profesor dijo en clase, manda la clase y dilo.
+- El código R del profesor muestra los comandos tal como él los usa. Cuando la materia se
+  trabaja en R, pon el comando junto a su concepto, en `<pre><code>`, con una línea que diga
+  qué hace y cómo se lee su salida. Lleva la marca `MP`.
 - No escribas nombres de personas, correos ni RUT que aparezcan en el material.
 
 ## Marcas
@@ -44,7 +48,8 @@ Manda la materia vista en estas clases. El resto del material solo ayuda a estud
   evaluación". Si ayuda a estudiar, di en qué clase (por su fecha) dentro del texto, nunca
   dentro de la marca.
 - `<span class="f mp">MP</span>` sale de una lámina o una ayudantía del profesor.
-- `<span class="f pa">PA</span>` sale de una pauta de un semestre anterior.
+- `<span class="f pa">PA</span>` sale de una pauta de un semestre anterior o de un control
+  anterior.
 - `?` y `+` significan lo mismo que en la hoja de clase.
 
 ## Estructura
@@ -63,6 +68,16 @@ Manda la materia vista en estas clases. El resto del material solo ayuda a estud
 Seis páginas impresas como máximo. Entre 12 y 22 tarjetas, y entre 2.000 y 3.500 palabras
 visibles. Más clases no significa más palabras: significa elegir mejor. Hasta cuatro
 gráficos.
+
+## Si la evaluación es un control
+
+Un control es corto y entra poca materia, a veces una sola clase. La hoja también:
+
+- Hasta tres páginas. Entre 8 y 14 tarjetas, y entre 1.000 y 2.000 palabras visibles.
+- Si el anuncio del profesor dice el formato (cuántas preguntas, de qué tipo), la sección de
+  práctica lo imita. Si viene un control anterior en el material, imita además su estilo.
+- Lo que entra es solo la materia de las clases que entran. Un control anterior sirve para
+  ver qué tipo de pregunta sale, no para agregar su materia.
 
 ## Si la evaluación es un trabajo
 

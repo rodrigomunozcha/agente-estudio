@@ -72,7 +72,7 @@ from claude_agent_sdk import (
 
 from .config import cargar_config, dir_pendientes
 from .nombres import nombre_base
-from .revisor import leer_calidad
+from .revisor import leer_calidad, texto_calidad
 from .skill_runner import CLI_PATH, PROJECT_ROOT, consultar, describir_error_sdk, normalizar_resultado
 from .uso import registrar_uso
 
@@ -549,9 +549,7 @@ def _linea_calidad(calidad: dict | None) -> str:
     if not calidad:
         return ('<p class="leyenda"><b>Transcripción:</b> no se pudo medir su calidad '
                 "en esta clase.</p>")
-    motivo = html.escape(calidad["motivo"], quote=True)
-    return (f'<p class="leyenda"><b>Transcripción: {calidad["puntaje"]}/100</b> '
-            f"(guía, no definitiva). {motivo}</p>")
+    return f'<p class="leyenda"><b>Transcripción:</b> {html.escape(texto_calidad(calidad), quote=True)}</p>'
 
 
 def ruta_de_hoja(trabajo: dict, titulo: str, config: dict, sufijo: str = "") -> Path:

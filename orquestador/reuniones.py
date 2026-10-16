@@ -68,6 +68,8 @@ RUTA_INSTRUCCIONES = Path(__file__).parent / "plantilla_reunion" / "instruccione
 MARCA_INICIO, MARCA_FIN = "===REUNION_INICIO===", "===REUNION_FIN==="
 MARCA_REVISION_INICIO, MARCA_REVISION_FIN = "===REVISION_INICIO===", "===REVISION_FIN==="
 MAX_TURNS = 12  # la busqueda web gasta turnos, este es el seguro
+# El revisor no usa herramientas: lee el prompt y contesta en un turno.
+MAX_TURNS_REVISION = 1
 # El modelo mas capaz del plan Pro (decision del 14-10-2026, issue #1): las reuniones
 # son pocas y su calidad pesa mas que su tiempo. Sin costo extra: va por la sesion Pro.
 MODELO = "claude-opus-5-5"
@@ -197,8 +199,13 @@ def extraer_revision(texto: str) -> dict | None:
 async def revisar_reunion(texto: str, datos: dict, slug: str) -> dict | None:
     """La revision, o None si no se pudo. Nunca lanza: sin revision la reunion se
     guarda igual, y la nota dice que no se pudo medir."""
-    revisable = {k: datos.get(k) for k in ("resumen", "decisiones", "acciones", "preguntas_abiertas", "entrevista")}
-    revisable["acciones"] = [{k: a.get(k) for k in ("que", "quien", "cuando", "fecha")} for a in datos["acciones"]]
+    partes, final = [], None
+    try:
+        revisable = {k: datos.get(k) for k in ("resumen", "decisiones", "preguntas_abiertas", "entrevista")}
+        revisable["acciones"] = [{k: a.get(k) for k in ("que", "quien", "cuando", "fecha")}
+                                 for a in datos.get("acciones") or []]
+    except (AttributeError, TypeError):
+        return None
     options = ClaudeAgentOptions(
         cwd=str(PROJECT_ROOT),
         setting_sources=[],
@@ -206,11 +213,10 @@ async def revisar_reunion(texto: str, datos: dict, slug: str) -> dict | None:
         allowed_tools=[],
         disallowed_tools=HERRAMIENTAS_PROHIBIDAS,
         cli_path=str(CLI_PATH),
-        max_turns=1,
+        max_turns=MAX_TURNS_REVISION,
     )
     prompt = (f"===ANALISIS===\n{json.dumps(revisable, ensure_ascii=False, indent=1)}\n===FIN===\n\n"
               f"===TRANSCRIPCIÓN===\n{texto}\n===FIN===")
-    partes, final = [], None
     try:
         async for mensaje in consultar(prompt=prompt, options=options):
             if isinstance(mensaje, AssistantMessage):
@@ -247,8 +253,7 @@ def aplicar_revision(datos: dict, revision: dict | None) -> dict:
 
 def linea_calidad(datos: dict) -> str | None:
     if datos.get("calidad"):
-        c = datos["calidad"]
-        return f"{c['puntaje']}/100 (guía, no definitiva). {c['motivo']}"
+        return revisor.texto_calidad(datos["calidad"])
     return "No se pudo medir en esta reunión." if datos.get("revisada") else None
 
 

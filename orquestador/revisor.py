@@ -57,7 +57,7 @@ MAX_TURNS = 25
 RUBRICA_PUNTAJE = """\
 Ademas, califica de 1 a 100 cuanto de lo que se dijo se puede recuperar desde la
 transcripcion. No descuentes por nombres o terminos mal escritos que se reconocen
-por el contexto ("Durbin-Waxon" por Durbin-Watson, "Chapiro" por Shapiro): el
+por el contexto ("Fourrier" por Fourier, "Laplas" por Laplace): el
 texto que se escribio despues los corrige y no llegan al estudiante. Descuenta
 por lo que no se puede recuperar: pasajes que no se entienden, numeros, fechas o
 formulas dudosos, frases cortadas que cambian el sentido, lo que se mostraba en
@@ -184,9 +184,14 @@ def calidad_transcripcion(revision: dict | None) -> dict | None:
     if not isinstance(t, dict):
         return None
     puntaje = t.get("puntaje")
-    if not isinstance(puntaje, int) or isinstance(puntaje, bool) or not 1 <= puntaje <= 100:
+    if not isinstance(puntaje, (int, float)) or isinstance(puntaje, bool) or not 1 <= puntaje <= 100:
         return None
-    return {"puntaje": puntaje, "motivo": str(t.get("motivo") or "")[:300]}
+    return {"puntaje": round(puntaje), "motivo": str(t.get("motivo") or "")[:300]}
+
+
+def texto_calidad(calidad: dict) -> str:
+    """Como se muestra el puntaje en la hoja, la nota, el .docx y Telegram."""
+    return f"{calidad['puntaje']}/100 (guía, no definitiva). {calidad['motivo']}".strip()
 
 
 def leer_calidad(slug: str) -> dict | None:

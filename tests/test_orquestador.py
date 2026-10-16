@@ -1242,32 +1242,32 @@ def probar_material_del_profesor() -> None:
     check("y sin material el revisor no lo menciona",
           "Material" not in revisor._construir_prompt("t.txt", "f.md", "a.md", "R", []))
     check("el puntaje no descuenta nombres que se reconocen por el contexto",
-          "Durbin-Waxon" in revisor.SYSTEM_PROMPT)
+          "Fourrier" in revisor.SYSTEM_PROMPT)
     check("la skill sigue recibiendo su prompt", "Ramo: R" in skill_runner._construir_prompt("t", "R", "c", linea))
 
 
 def probar_laminas_en_la_hoja_de_evaluacion() -> None:
     """
-    La hoja de una evaluacion se rehace cuando el profesor ya subio las laminas
-    de las clases que entran. Cada lamina o ayudantia se asigna a su clase (por
-    la fecha del nombre, o si no por parecido con la nota) y entran solo las de
-    las clases de esa evaluacion. Solo PPTs/ y Ayudantias/: nunca la raiz ni
-    otra carpeta del ramo.
+    La hoja de una evaluacion se rehace cuando el profesor ya subio su material.
+    Cada lamina, ayudantia o script de R se asigna a su clase (por la fecha del
+    nombre, o si no por parecido con la nota) y entran solo los de las clases de
+    esa evaluacion. Para un control entran ademas los controles anteriores. Solo
+    carpetas de la lista blanca: nunca la raiz ni otra carpeta del ramo.
     """
-    print("\n== laminas y ayudantias en la hoja de evaluacion ==")
+    print("\n== material del profesor en la hoja de evaluacion ==")
     from orquestador import material_ramo as m
 
-    clases = {"2026-08-06": "introduccion regresion minimos cuadrados estimadores",
-              "2026-10-01": "variables dummy ancova igualdad coeficientes",
-              "2026-10-15": "supuestos residuos normalidad autocorrelacion heterocedasticidad"}
-    textos = {"clase-dummy.pdf": "variables dummy ancova trampa coeficientes",
-              "clase-supuestos.pdf": "supuestos normalidad residuos autocorrelacion",
-              "Ejercicio 15-10.pdf": "variables dummy ancova",
-              "2026.08.06_intro.pdf": "supuestos normalidad residuos",
-              "Clase-3-4.pdf": "minimos cuadrados estimadores regresion",
+    clases = {"2026-08-06": "introduccion temperatura presion volumen gases ideales",
+              "2026-10-01": "entalpia calorimetro reaccion exotermica capacidad",
+              "2026-10-15": "entropia desorden segunda reversible irreversible carnot"}
+    textos = {"clase-entalpia.pdf": "entalpia calorimetro reaccion endotermica capacidad",
+              "clase-entropia.pdf": "entropia desorden reversible carnot",
+              "Ejercicio 15-10.pdf": "entalpia calorimetro reaccion",
+              "2026.08.06_intro.pdf": "entropia desorden reversible",
+              "Clase-3-4.pdf": "temperatura presion volumen gases ideales",
               "nada que ver.pdf": "futbol cocina musica"}
     asignadas = m.asignar_a_clases(textos, clases)
-    check("una lamina va a la clase con que mas se parece", asignadas["clase-dummy.pdf"] == "2026-10-01")
+    check("una lamina va a la clase con que mas se parece", asignadas["clase-entalpia.pdf"] == "2026-10-01")
     check("la fecha del nombre manda sobre el parecido (dd-mm sin año)",
           asignadas["Ejercicio 15-10.pdf"] == "2026-10-15", str(asignadas))
     check("y tambien con el año adelante", asignadas["2026.08.06_intro.pdf"] == "2026-08-06", str(asignadas))
@@ -1276,39 +1276,78 @@ def probar_laminas_en_la_hoja_de_evaluacion() -> None:
 
     tmp = Path(tempfile.mkdtemp(prefix="laminas_"))
     ramo = tmp / "Ramo"
-    for carpeta in ("PPTs", "Ayudantias", "Profe", "Lecturas"):
+    for carpeta in ("PPTs", "Ayudantias", "Código R", "Evaluaciones", "Profe", "Lecturas"):
         (ramo / carpeta).mkdir(parents=True)
-    contenido = {"PPTs/clase-dummy.pdf": textos["clase-dummy.pdf"],
-                 "PPTs/copia-dummy.pdf": textos["clase-dummy.pdf"],
+    contenido = {"PPTs/clase-entalpia.pdf": textos["clase-entalpia.pdf"],
+                 "PPTs/copia-entalpia.pdf": textos["clase-entalpia.pdf"],
                  "PPTs/clase-intro.pdf": clases["2026-08-06"],
+                 "PPTs/escaneada 01-10.pdf": "",
                  "Ayudantias/Ejercicio 15-10.pdf": textos["Ejercicio 15-10.pdf"],
-                 "Profe/perfil.pdf": textos["clase-dummy.pdf"],
-                 "Lecturas/libro.pdf": textos["clase-dummy.pdf"],
-                 "suelta-dummy.pdf": textos["clase-dummy.pdf"]}
-    for rel in contenido:
-        (ramo / rel).write_text("x")
+                 "Código R/entropia.R": "# entropia desorden reversible carnot",
+                 "Código R/notas.txt": textos["clase-entalpia.pdf"],
+                 "Evaluaciones/Pauta-C1.R": "# pauta del control 1",
+                 "Evaluaciones/PAUTA-SOLEMNE-1.pdf": "pauta de solemne",
+                 "Profe/perfil.pdf": textos["clase-entalpia.pdf"],
+                 "Lecturas/libro.pdf": textos["clase-entalpia.pdf"],
+                 "suelta-entalpia.pdf": textos["clase-entalpia.pdf"]}
+    for rel, texto in contenido.items():
+        (ramo / rel).write_text(texto)
     leidos = []
     original = m._texto_pdf
     m._texto_pdf = lambda ruta: leidos.append(ruta.name) or contenido[str(ruta.relative_to(ramo))]
     try:
-        material = m.material_de_la_evaluacion(
-            "RAMO", {"carpetas_onedrive": {"RAMO": str(ramo)}}, clases, {"2026-10-01", "2026-10-15"})
+        config = {"carpetas_onedrive": {"RAMO": str(ramo)}}
+        material = m.material_de_la_evaluacion("RAMO", config, clases, {"2026-10-01", "2026-10-15"})
         nombres = sorted(x["archivo"] for x in material)
-        check("entran la lamina y la ayudantia de las clases de la evaluacion, una vez cada una",
-              nombres == ["Ejercicio 15-10.pdf", "clase-dummy.pdf"], str(nombres))
-        check("con su categoria", {x["categoria"] for x in material} == {"lámina", "ayudantía"})
+        check("entran la lamina, la ayudantia y el script de las clases de la evaluacion, una vez cada uno",
+              nombres == ["Ejercicio 15-10.pdf", "clase-entalpia.pdf", "entropia.R", "escaneada 01-10.pdf"],
+              str(nombres))
+        check("con su categoria", {x["categoria"] for x in material} == {"lámina", "ayudantía", "código R"})
+        check("una escaneada que su fecha ubica entra avisando que no se pudo leer",
+              [x["sin_texto"] for x in material if x["archivo"] == "escaneada 01-10.pdf"] == [True])
         check("una lamina de otra evaluacion no entra", "clase-intro.pdf" not in nombres)
         check("ni Profe, ni Lecturas, ni la raiz se abren",
-              not {"perfil.pdf", "libro.pdf", "suelta-dummy.pdf"} & set(leidos), str(leidos))
+              not {"perfil.pdf", "libro.pdf", "suelta-entalpia.pdf"} & set(leidos), str(leidos))
+        check("en Código R solo entra el código", "notas.txt" not in nombres)
+        check("sin control, los controles anteriores no entran", "Pauta-C1.R" not in nombres)
+        control = m.material_de_la_evaluacion("RAMO", config, clases, {"2026-10-15"}, es_control=True)
+        check("para un control entran los controles anteriores, no las solemnes",
+              "Pauta-C1.R" in [x["archivo"] for x in control]
+              and "PAUTA-SOLEMNE-1.pdf" not in [x["archivo"] for x in control], str(control))
     finally:
         m._texto_pdf = original
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def probar_hoja_de_un_control() -> None:
+    """
+    Un control no esta en el calendario de evaluaciones como las solemnes: se
+    anota como pendiente cuando el profesor lo anuncia. Su hoja junta las clases
+    desde la ultima evaluacion hasta el dia anterior al control.
+    """
+    print("\n== hoja de un control ==")
+    from orquestador import hoja_evaluacion as he
+
+    evs = [{"nombre": "S1", "fecha": "2026-09-25"}, {"nombre": "S2", "fecha": "2026-11-13"}]
+    fechas = ["2026-08-14", "2026-09-25", "2026-10-02", "2026-10-09", "2026-10-16", "2026-10-23"]
+    check("entran las clases desde la S1 hasta el dia anterior al control",
+          he.clases_del_control(evs, fechas, "2026-10-16") == {"2026-10-02", "2026-10-09"})
+    datos = {"pendientes": [{"ramo": "R", "fecha": "2026-10-16", "que": "Control corto de 15 preguntas",
+                             "textual": "un control cortito de 15 preguntas", "clase": "2026-10-09"},
+                            {"ramo": "R", "fecha": "2026-10-16", "que": "Leer el capítulo 3"}]}
+    ev = he.evaluacion_control(datos, "R", "2026-10-16")
+    check("el control trae lo que dijo el profesor al anunciarlo",
+          ev["fuente"] == "clase" and "15 preguntas" in ev["textual"] and ev["tipo"] == "prueba", str(ev))
+    check("sin anuncio, igual se arma con su fecha",
+          he.evaluacion_control({"pendientes": []}, "R", "2026-10-16")["fecha"] == "2026-10-16")
+    check("el archivo lleva la fecha, para no pisar el control siguiente",
+          he.nombre_archivo("TERMODINAMICA", "Control", "2026-10-16").startswith("Control 16.10.26 - "))
+
+
 def probar_tu_y_otros_en_la_grabadora() -> None:
     """
     La grabadora del Mac deja tu microfono en el canal izquierdo y la llamada en
-    el derecho. Se transcriben por separado y cada frase queda marcada como "Tú"
+    el derecho. Se transcriben por separado y cada turno queda marcado como "Tú"
     u "Otros". Si tu microfono no grabo nada, sale como antes, sin marcas.
     """
     print("\n== Tú y Otros en lo que graba la grabadora ==")
@@ -1316,16 +1355,27 @@ def probar_tu_y_otros_en_la_grabadora() -> None:
 
     from orquestador import transcripcion as tr
 
-    otros = [(0.0, "Hoy vemos los supuestos."), (4.0, "Empecemos por la normalidad."),
-             (20.0, "Buena pregunta, la respuesta es no.")]
-    tu = [(4.5, "Empecemos por la normalidad."), (12.0, "Profe, ¿y si la muestra es chica?")]
+    largo = " Esto se explica con calma y con un ejemplo completo para que se entienda bien en la prueba."
+    otros = [(0.0, "Hoy vemos los supuestos." + largo), (4.0, "Empecemos por la normalidad."),
+             (9.0, "Sí, claro."), (20.0, "Buena pregunta, la respuesta es no." + largo)]
+    tu = [(4.5, "Empecemos por la normalidad."), (10.0, "Sí, claro que sí."),
+          (12.0, "Profe, ¿y si la muestra es chica?")]
     texto = tr.mezclar_por_tiempo(tu, otros)
     check("cada turno lleva quien habla, en orden",
-          texto.splitlines()[1:] == ["Otros: Hoy vemos los supuestos.", "Empecemos por la normalidad.",
-                                     "Tú: Profe, ¿y si la muestra es chica?",
-                                     "Otros: Buena pregunta, la respuesta es no."], texto)
+          [x[:12] for x in texto.splitlines()[1:]] == ["Otros: Hoy v", "Empecemos po", "Sí, claro.",
+                                                       "Tú: Sí, clar", "Profe, ¿y si", "Otros: Buena"], texto)
     check("lo que tu micrófono repite de los parlantes no se duplica", texto.count("normalidad") == 1)
+    check("una respuesta corta tuya parecida a la de ellos no se borra", "Tú: Sí, claro que sí." in texto)
     check("la primera línea explica las marcas", "Tú" in texto.splitlines()[0] and "Otros" in texto.splitlines()[0])
+
+    # Transcriptotem deja dos "Gracias." de una racha de cinco: entran dos, no cinco.
+    segmentos = [(0.0, 1.0, "Gracias.")] * 5 + [(6.0, 7.0, "Hola")]
+    check("al emparejar con el texto limpio se respeta cuántas veces quedó cada frase",
+          [f for _, _, f in tr.emparejar(segmentos, "Gracias.\nGracias.\nHola", 10.0)]
+          == ["Gracias.", "Gracias.", "Hola"])
+    check("y los tiempos se corren al inicio del trozo", tr.emparejar(segmentos, "Hola", 10.0) == [(16.0, 17.0, "Hola")])
+    check("si no se capturaron tiempos, el texto entra igual",
+          tr.emparejar([], "Uno\nDos", 5.0) == [(5.0, 5.0, "Uno"), (5.0, 5.0, "Dos")])
 
     tmp = Path(tempfile.mkdtemp())
     original = tr._transcribir_con_tiempos
@@ -1343,22 +1393,29 @@ def probar_tu_y_otros_en_la_grabadora() -> None:
         check("un estéreo de la grabadora se reconoce", tr.es_de_dos_pistas(str(estereo)))
         check("uno del iPhone no", not tr.es_de_dos_pistas(str(tmp / "Clase 16.10.26.m4a")))
 
-        def falsa(transcribe, ruta, perfil, contexto, duracion, verificar):
-            if Path(ruta).stem.endswith("otros"):
-                return [(t, t + 2, f) for t, f in otros]
-            return [(1.0, 3.0, "Profe, ¿y si la muestra es chica?")]
-        tr._transcribir_con_tiempos = falsa
+        respuestas = {"otros": [(t / 5, t / 5 + 0.5, f) for t, f in otros],
+                      "tu": [(1.0, 3.0, "Profe, ¿y si la muestra es chica?")]}
+        tr._transcribir_con_tiempos = lambda t, ruta, *a: respuestas[Path(ruta).stem.split()[-1]]
         texto = tr.transcribir_dos_pistas(None, str(estereo), "es-chile", "", 6, "x")
         check("con voz en tu micrófono, sale con marcas", "Tú: Profe" in texto, texto[:200])
-
-        # En los silencios de tu microfono Whisper inventa "Gracias.": paso en la
-        # prueba en vivo del 16-10-2026, siete veces en cuatro minutos.
-        check("una frase tuya que cae en silencio no entra",
-              tr.frases_con_voz([(1.0, 3.0, "Hola"), (10.0, 11.0, "Gracias.")], [(0.5, 4.0)])
-              == [(1.0, "Hola")])
         texto = tr.transcribir_dos_pistas(None, str(mudo), "es-chile", "", 6, "x")
         check("sin voz en tu micrófono, sale como antes, sin marcas",
               "Tú" not in texto and "Hoy vemos los supuestos." in texto, texto[:200])
+
+        # Una entrevista donde hablas tu y la llamada calla: no se pierde la grabacion.
+        respuestas = {"otros": [], "tu": [(1.0, 5.0, "Mi experiencia fue en una clínica." + largo * 3)]}
+        texto = tr.transcribir_dos_pistas(None, str(estereo), "es-chile", "", 6, "x")
+        check("si la llamada calla y tú hablas, la grabación no se pierde", "Tú: Mi experiencia" in texto)
+        respuestas = {"otros": [], "tu": []}
+        try:
+            tr.transcribir_dos_pistas(None, str(estereo), "es-chile", "", 6, "x")
+            check("si no hay nada en ninguno de los dos, se detiene como una clase vacía", False)
+        except ValueError:
+            check("si no hay nada en ninguno de los dos, se detiene como una clase vacía", True)
+
+        check("una frase tuya que cae en silencio no entra",
+              tr.frases_con_voz([(1.0, 3.0, "Hola"), (10.0, 11.0, "Gracias.")], [(0.5, 4.0)])
+              == [(1.0, "Hola")])
     finally:
         tr._transcribir_con_tiempos = original
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1561,6 +1618,8 @@ def probar_puntaje_de_la_transcripcion_en_la_hoja() -> None:
     doc = h.armar_documento(trabajo, "T", "<p>c</p>", "", calidad=calidad)
     check("la hoja muestra el puntaje como guia", "64/100" in doc and "guía" in doc)
     check("y el motivo va escapado", "&lt;tecnicos&gt;" in doc and "<tecnicos>" not in doc)
+    check("un puntaje con decimales se redondea, no se pierde",
+          revisor.calidad_transcripcion({"transcripcion": {"puntaje": 72.6, "motivo": ""}}) == {"puntaje": 73, "motivo": ""})
     doc = h.armar_documento(trabajo, "T", "<p>c</p>", "")
     check("sin revision dice que no se pudo medir, no inventa un puntaje",
           "no se pudo medir" in doc and "/100" not in doc)

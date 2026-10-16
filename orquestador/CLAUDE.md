@@ -47,7 +47,11 @@ Por eso, si tocas esa configuración:
      menos que la revisión. Desde el 14-09-2026 es lo único que el pipeline genera
      además de las notas: el `.docx` y las flashcards de Anki salieron del todo.
 
-  Antes de agregar una quinta, mide qué ahorra.
+  Antes de agregar una quinta, mide qué ahorra. Hay una que solo corre cuando falla
+  algo: si la línea RESULTADO_ORQUESTADOR viene con el JSON roto, se retoma la sesión de
+  la primera, sin herramientas y en un turno, para que la repita (16-10-2026). Rehacer la
+  clase costaba unos 12 turnos. Las reuniones no pasan por estas cuatro: tienen su
+  análisis y su revisor aparte (`reuniones.py`).
 - **`max_turns` es un seguro contra corridas descontroladas**, no un objetivo. Cada
   etapa tiene el suyo según el trabajo que hace, y los cuatro son constantes con
   nombre: `MAX_TURNS` (30, escribir la clase) y `MAX_TURNS_CORRECCION` (30, corregir)

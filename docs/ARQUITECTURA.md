@@ -99,6 +99,8 @@ El camino de una clase:
    revisor. El revisor además pone el puntaje de 1 a 100 que la hoja muestra arriba.
    La hoja de evaluación suma las láminas de `PPTs/` y las ayudantías de `Ayudantias/` de las
    clases que entran: cada PDF se asigna a su clase por la fecha del nombre o por parecido.
+   También el código de `Código R/`. La hoja de un control se pide a mano:
+   `python3 -m orquestador.hoja_evaluacion "<RAMO>" Control <AAAA-MM-DD>`.
 5. `notificaciones` avisa en el Mac y repite en Telegram solo los avisos finales.
 
 Una grabación con ramo `REUNIÓN` se desvía a `reuniones.py`. Deja una nota en `Reuniones/`

@@ -308,7 +308,7 @@ async def procesar_clase_reconocida(trabajo_metadata: dict, config: dict, bitaco
     ruta_skill_json = dir_pendientes() / f"{slug}_skill.json"
     # El programa del ramo y la lamina de la clase, si ya esta (ver
     # material_ramo.py). Se arma aunque la skill ya haya corrido: el revisor
-    # tambien lo usa. Son segundos de pdftotext, sin modelo.
+    # tambien lo usa. Lee los PDF de PPTs/ con pypdf en cada clase: segundos, sin modelo.
     ruta_material = material_ramo.preparar(ramo, config, ruta_texto, slug)
     if ruta_skill_json.exists():
         notificar_progreso(estado_vivo.PASO_SKILL, "ya estaba analizada, retomando desde ahi")

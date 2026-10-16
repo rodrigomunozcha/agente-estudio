@@ -371,6 +371,8 @@ final class Sesion {
     var inicio: Date { cronometro.inicio }
     // Cuantos recordatorios de la pausa en curso ya salieron.
     var recordatoriosPausa = 0
+    // Segundos grabados al detener, sin las pausas: el largo de la mezcla.
+    var duracion: Double = 0
     let conPantalla: Bool
     let sistema = AudioSistema()
     let microfono: Microfono
@@ -615,6 +617,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
 
     @objc private func detener() {
         guard let sesion else { return }
+        sesion.duracion = sesion.cronometro.segundo()
         sesion.microfono.detener()
         if let sinReposo = sesion.sinReposo { ProcessInfo.processInfo.endActivity(sinReposo) }
         sesion.sistema.detener()
@@ -762,8 +765,10 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         // cada frase como "Tú" u "Otros" (transcripcion.transcribir_dos_pistas).
         // Hasta el 16-10-2026 iba todo mezclado en un canal y el analisis de una
         // reunion no podia saber quien dijo que. Sin una de las dos, va mono.
-        // El canal de tu voz se rellena con silencio (apad) y amerge corta al
-        // terminar la llamada, que dura toda la grabacion.
+        // Los dos canales se rellenan con silencio (apad) y la mezcla se corta en
+        // la duracion de la sesion (-t). Antes amerge cortaba al terminar el
+        // canal mas corto: si el audio de la llamada se caia a mitad de camino,
+        // se perdia tu voz desde ahi (revision de codigo del 16-10-2026).
         let sistema = pistas.indices.filter { pistas[$0].url == sesion.audioSistema }
         let microfonos = pistas.indices.filter { pistas[$0].url != sesion.audioSistema }
         let dosPistas = !sistema.isEmpty && !microfonos.isEmpty
@@ -771,7 +776,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         if dosPistas {
             mezcla += microfonos.map { "[p\($0)]" }.joined()
                 + (microfonos.count > 1 ? "amix=inputs=\(microfonos.count):duration=longest:normalize=0," : "")
-                + "apad[tu];[p\(sistema[0])]aformat=channel_layouts=mono[otros];[tu][otros]amerge=inputs=2[a]"
+                + "apad[tu];[p\(sistema[0])]aformat=channel_layouts=mono,apad[otros];[tu][otros]amerge=inputs=2[a]"
         } else {
             mezcla += pistas.indices.map { "[p\($0)]" }.joined()
                 + "amix=inputs=\(pistas.count):duration=longest:normalize=0[a]"
@@ -782,9 +787,10 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         let destino = libre(input, base, "m4a")
         let parcial = destino.appendingPathExtension("part")
         let entradas = pistas.flatMap { ["-i", $0.url.path] }
-        guard correr(ffmpeg, ["-y"] + entradas + ["-filter_complex", mezcla, "-map", "[a]",
-                                                   "-ac", dosPistas ? "2" : "1", "-c:a", "aac",
-                                                   "-b:a", dosPistas ? "128k" : "96k", "-f", "ipod", parcial.path]),
+        let largo = dosPistas ? ["-t", String(format: "%.2f", max(sesion.duracion, 1))] : []
+        guard correr(ffmpeg, ["-y"] + entradas + ["-filter_complex", mezcla, "-map", "[a]"] + largo
+                             + ["-ac", dosPistas ? "2" : "1", "-c:a", "aac",
+                                "-b:a", dosPistas ? "128k" : "96k", "-f", "ipod", parcial.path]),
               (try? FileManager.default.moveItem(at: parcial, to: destino)) != nil else {
             avisar("No se pudo mezclar el audio", pistasGuardadas(sesion))
             return

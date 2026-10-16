@@ -91,6 +91,10 @@ MAX_TURNS = 30
 # sobre notas que ya existen, no el trabajo completo.
 MAX_TURNS_CORRECCION = 30
 
+# Pedir de nuevo la linea de resultado cuando vino con el JSON roto: es repetir
+# un texto, sin herramientas, asi que un turno basta.
+MAX_TURNS_RESULTADO = 1
+
 
 def construir_gate_de_rutas(*raices_permitidas: str | Path):
     """
@@ -483,9 +487,10 @@ async def _pedir_resultado_de_nuevo(session_id: str, slug: str) -> dict | None:
         setting_sources=[],
         resume=session_id,
         allowed_tools=[],
-        disallowed_tools=["Bash", "Write", "Edit", "Read", "Glob", "Grep"],
+        disallowed_tools=["Bash", "Write", "Edit", "NotebookEdit", "Read", "Glob", "Grep",
+                          "WebFetch", "WebSearch", "Task"],
         cli_path=str(CLI_PATH),
-        max_turns=1,
+        max_turns=MAX_TURNS_RESULTADO,
     )
     partes = []
     try:
@@ -501,8 +506,9 @@ async def _pedir_resultado_de_nuevo(session_id: str, slug: str) -> dict | None:
             elif isinstance(mensaje, ResultMessage):
                 registrar_uso("resultado", slug, mensaje)
     except Exception:
-        # Si esto falla, la clase falla con el mismo error que antes.
-        return None
+        # Un error tardio no descarta lo que ya llego: se intenta leer igual. Si
+        # no hay linea, la clase falla con el mismo error que antes.
+        pass
     return _parsear_resultado("\n".join(partes))
 
 

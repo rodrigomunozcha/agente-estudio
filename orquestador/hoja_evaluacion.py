@@ -44,12 +44,13 @@ from .hoja_html import (
     envolver_documento,
     pedir_hoja,
 )
-from .nombres import ramo_legible
+from .nombres import fecha_corta, ramo_legible
+from .ramo_por_nombre import normalizar
 from .notificaciones import notificar_aviso, notificar_hoja_evaluacion, notificar_progreso
 
 RUTA_INSTRUCCIONES_EVALUACION = Path(__file__).parent / "plantilla_hoja" / "instrucciones_evaluacion.md"
 
-NOMBRES = {"S1": "Solemne 1", "S2": "Solemne 2", "Examen": "Examen"}
+NOMBRES = {"S1": "Solemne 1", "S2": "Solemne 2", "Examen": "Examen", "Control": "Control"}
 
 TIMEOUT_SEGUNDOS = 25 * 60
 
@@ -70,11 +71,43 @@ _NOTA = re.compile(r"^Aprendizaje - Clase (\d{4}-\d{2}-\d{2}) - (.+)\.md$")
 # Como se nombra cada tipo de material, en la tarjeta y en el prompt.
 ROTULOS = {"programa": "programa del ramo", "enunciado": "enunciado o pauta del trabajo",
            "evaluacion pasada": "pauta de un semestre anterior",
-           "lámina": "lámina del profesor", "ayudantía": "ayudantía"}
+           "lámina": "lámina del profesor", "ayudantía": "ayudantía",
+           "código R": "código R del profesor", "control anterior": "control anterior"}
 
 
-def nombre_archivo(ramo: str, evaluacion: str) -> str:
-    return f"{NOMBRES.get(evaluacion, evaluacion)} - {ramo_legible(ramo)}.html"
+def nombre_archivo(ramo: str, evaluacion: str, fecha: str | None = None) -> str:
+    # Un ramo tiene varios controles: el del control lleva su fecha para no pisar el anterior.
+    nombre = f"Control {fecha_corta(fecha)}" if evaluacion == "Control" and fecha else NOMBRES.get(evaluacion, evaluacion)
+    return f"{nombre} - {ramo_legible(ramo)}.html"
+
+
+# --------------------------------------------------------------------------
+# Controles
+# --------------------------------------------------------------------------
+#
+# Un control no esta en evaluaciones.json como las solemnes, que salen del
+# calendario: se anota como pendiente cuando el profesor lo anuncia en clase.
+# Su hoja se pide a mano (pedido del estudiante el 16-10-2026, para un control
+# de ese dia). No se rehace sola despues de cada clase.
+
+def evaluacion_control(datos: dict, ramo: str, fecha: str) -> dict:
+    """La evaluacion de un control, con lo que dijo el profesor al anunciarlo si se
+    anoto. Sin anuncio se arma igual, solo con la fecha."""
+    ev = {"nombre": "Control", "fecha": fecha, "tipo": "prueba", "acumula": False}
+    anuncio = next((p for p in datos.get("pendientes", [])
+                    if p.get("ramo") == ramo and p.get("fecha") == fecha
+                    and "control" in normalizar(p.get("que") or "")), None)
+    if anuncio and anuncio.get("textual"):
+        ev.update(fuente="clase", textual=anuncio["textual"], clase=anuncio.get("clase"))
+    return ev
+
+
+def clases_del_control(evs: list[dict], fechas: list[str], fecha: str) -> set[str]:
+    """Las clases desde la ultima evaluacion antes del control hasta el dia anterior.
+    ponytail: un control anterior no corta el alcance, porque los controles no
+    quedan anotados como evaluacion. Si importa, anotarlos en evaluaciones.json."""
+    desde = max((e["fecha"] for e in evs if e.get("fecha") and e["fecha"] < fecha), default="")
+    return {f for f in fechas if desde < f < fecha}
 
 
 def clases_del_ramo(carpeta: Path) -> list[tuple[str, str, Path]]:
@@ -160,7 +193,7 @@ def _escribir(ruta: Path, documento: str) -> None:
 
 
 async def generar(ramo: str, nombre: str, config: dict, datos: dict | None = None,
-                  en_el_pipeline: bool = False) -> Path | None:
+                  en_el_pipeline: bool = False, fecha_control: str | None = None) -> Path | None:
     """
     Rehace la hoja de una evaluacion. Devuelve su ruta, o None si no habia
     clases que juntar o si la redaccion fallo (y en ese caso avisa y la hoja
@@ -168,15 +201,18 @@ async def generar(ramo: str, nombre: str, config: dict, datos: dict | None = Non
     """
     datos = datos or evaluaciones.cargar()
     evs = datos["ramos"][ramo]
-    ev = next(e for e in evs if e["nombre"] == nombre)
-    nombre_largo = NOMBRES.get(nombre, nombre)
+    es_control = nombre == "Control"
+    ev = (evaluacion_control(datos, ramo, fecha_control) if es_control
+          else next(e for e in evs if e["nombre"] == nombre))
+    nombre_largo = f"Control del {_fecha_legible(fecha_control)}" if es_control else NOMBRES.get(nombre, nombre)
 
     # El cache de carpetas no se guarda desde aqui: la clase ya lo resolvio y lo
     # guardo antes (finalizar_clase), y escribir config.json desde una etapa que
     # tambien corre a mano es arriesgar la configuracion por un atajo de busqueda.
     carpeta, _ = resolver_carpeta_ramo(ramo, config["rutas"]["vault_obsidian"], config)
     todas = clases_del_ramo(carpeta)
-    en_alcance = set(evaluaciones.clases_de(evs, nombre, [f for f, _, _ in todas]))
+    en_alcance = (clases_del_control(evs, [f for f, _, _ in todas], fecha_control) if es_control
+                  else set(evaluaciones.clases_de(evs, nombre, [f for f, _, _ in todas])))
     clases = [(f, t, r.read_text(encoding="utf-8")) for f, t, r in todas if f in en_alcance]
     if not clases:
         return None
@@ -190,9 +226,10 @@ async def generar(ramo: str, nombre: str, config: dict, datos: dict | None = Non
     # Las laminas y ayudantias de las clases que entran (ver material_ramo). Se
     # comparan con las notas de todas las clases del ramo para asignarlas.
     material += material_ramo.material_de_la_evaluacion(
-        ramo, config, {f: r.read_text(encoding="utf-8") for f, _, r in todas}, en_alcance)
-    perdidas = [p for p in datos.get("clases_perdidas", [])
-                if p.get("ramo") == ramo and evaluaciones.clases_de(evs, nombre, [p.get("fecha", "")])]
+        ramo, config, {f: r.read_text(encoding="utf-8") for f, _, r in todas}, en_alcance, es_control)
+    perdidas = [p for p in datos.get("clases_perdidas", []) if p.get("ramo") == ramo and (
+        clases_del_control(evs, [p.get("fecha", "")], fecha_control) if es_control
+        else evaluaciones.clases_de(evs, nombre, [p.get("fecha", "")]))]
 
     prompt = _construir_prompt(ramo, ev, tipo, clases, material)
     if len(prompt) > MAX_CARACTERES_ENTRADA:
@@ -225,18 +262,18 @@ async def generar(ramo: str, nombre: str, config: dict, datos: dict | None = Non
          if tipo == "trabajo" else
          f"Hoja de estudio de la evaluación. Junta las {len(clases)} clases que entran, con un "
          "hilo conductor entre ellas."),
-        "<b>CL</b> dicho en una de las clases que entran &nbsp;&middot;&nbsp; <b>MP</b> de una lámina "
-        "o ayudantía del profesor &nbsp;&middot;&nbsp; <b>PA</b> de una pauta "
-        "de un semestre anterior &nbsp;&middot;&nbsp; <b>?</b> dudoso por audio o reconstruido, "
+        "<b>CL</b> dicho en una de las clases que entran &nbsp;&middot;&nbsp; <b>MP</b> de una lámina, "
+        "ayudantía o código del profesor &nbsp;&middot;&nbsp; <b>PA</b> de una pauta o un control "
+        "anterior &nbsp;&middot;&nbsp; <b>?</b> dudoso por audio o reconstruido, "
         "conviene verificar &nbsp;&middot;&nbsp; <b>+</b> agregado aquí, no se dijo en clase",
         tarjeta_evaluacion(ev, clases, perdidas, material),
         cuerpo,
         "Fuente: las notas de aprendizaje de las clases que entran, revisadas contra la grabación"
         + (", y el material de la carpeta del ramo que se nombra arriba" if material else "")
-        + ". Lo marcado con <b>PA</b> sale de pautas de semestres anteriores y lo marcado con "
+        + ". Lo marcado con <b>PA</b> sale de pautas o controles anteriores y lo marcado con "
         "<b>+</b> es agregado.",
     )
-    ruta = Path(config["rutas"]["output"]) / ramo / "Evaluaciones" / nombre_archivo(ramo, nombre)
+    ruta = Path(config["rutas"]["output"]) / ramo / "Evaluaciones" / nombre_archivo(ramo, nombre, fecha_control)
     _escribir(ruta, documento)
 
     en_onedrive = False
@@ -268,8 +305,10 @@ if __name__ == "__main__":
     import anyio
 
     _datos = evaluaciones.cargar()
-    if len(sys.argv) != 3 or sys.argv[1] not in _datos["ramos"]:
+    _control = len(sys.argv) == 4 and sys.argv[2] == "Control"
+    if not (len(sys.argv) == 3 or _control) or sys.argv[1] not in _datos["ramos"]:
         print('Uso: python3 -m orquestador.hoja_evaluacion "<RAMO>" <S1|S2|Examen>')
+        print('     python3 -m orquestador.hoja_evaluacion "<RAMO>" Control <AAAA-MM-DD>')
         print("\n  Rehace la hoja de una evaluacion desde las notas de sus clases.")
         print("  Cuesta una llamada al modelo. Reemplaza la hoja anterior solo si sale bien.")
         for _ramo, _evs in _datos["ramos"].items():
@@ -278,7 +317,8 @@ if __name__ == "__main__":
 
     async def _una():
         with anyio.fail_after(TIMEOUT_SEGUNDOS):
-            return await generar(sys.argv[1], sys.argv[2], cargar_config(), _datos)
+            return await generar(sys.argv[1], sys.argv[2], cargar_config(), _datos,
+                                 fecha_control=sys.argv[3] if _control else None)
 
     _ruta = anyio.run(_una)
     print(f"  -> {_ruta}" if _ruta else "  No se generó: no hay clases que entren o falló la redacción.")

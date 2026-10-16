@@ -9,9 +9,9 @@ de esa clase, y las laminas de otras clases estaban en PPTs/. Ninguna etapa los
 leia.
 
 Se probo antes darle un glosario del programa a Whisper, en cada ventana de 30
-segundos (16-10-2026, tres tramos de 5 minutos de esa clase). Arreglo
-"heterocedasticidad", pero cambio "test" por "TED" y "p-valor" por "píbar", y
-tardo un 40% mas. Ademas no hacia falta para los nombres: la skill ya los
+segundos (16-10-2026, tres tramos de 5 minutos de esa clase). Arreglo un
+termino tecnico, pero deformo dos palabras comunes de la clase, y tardo un 40%
+mas. Ademas no hacia falta para los nombres: la skill ya los
 escribia bien en las notas. El material sirve mas ahi, donde se escribe.
 
 Se le pasa como texto en un archivo dentro de transcripciones_pendientes, no
@@ -38,20 +38,22 @@ de otra clase confunde mas de lo que ayuda.
 import hashlib
 import math
 import re
-import unicodedata
 from collections import Counter
 from datetime import date
 from pathlib import Path
 
 from .config import dir_pendientes
 from .onedrive import MAX_CARACTERES_POR_ARCHIVO, _texto_pdf, carpeta_del_ramo
+from .ramo_por_nombre import normalizar
 
 CARPETA_LAMINAS = "PPTs"
 PUNTAJE_MINIMO = 0.5
 VENTAJA_MINIMA = 0.1
-# Tope del archivo: un programa ronda los 10.000 caracteres y una lamina entre
-# 5.000 y 30.000. Pasado esto el costo de leerlo supera lo que aporta.
-MAX_CARACTERES = 40_000
+# Tope de cada parte por separado: un programa ronda los 10.000 caracteres y una
+# lamina entre 5.000 y 30.000. Antes era un tope comun al archivo, y un programa
+# largo podia dejar fuera la lamina sin aviso (revision de codigo, 16-10-2026).
+MAX_CARACTERES_PROGRAMA = 15_000
+MAX_CARACTERES_LAMINA = 25_000
 
 # Palabras de cinco letras o mas que salen en cualquier clase y no dicen el tema.
 _VACIAS = set("""porque cuando donde entonces tambien despues antes ahora todos todas estos
@@ -63,9 +65,12 @@ bueno ejemplo clase clases profesor""".split())
 
 
 def _palabras(texto: str) -> list[str]:
-    t = unicodedata.normalize("NFD", texto.lower())
-    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
-    return [p for p in re.findall(r"[a-z]{5,}", t) if p not in _VACIAS]
+    return [p for p in re.findall(r"[a-z]{5,}", normalizar(texto)) if p not in _VACIAS]
+
+
+def _pesos(palabras: set[str], en_cuantos: Counter, total_textos: int) -> dict[str, float]:
+    """Cuanto pesa cada palabra de un texto: mas si aparece en pocos textos del ramo."""
+    return {p: math.log(1 + total_textos / en_cuantos[p]) for p in palabras}
 
 
 def elegir_lamina(transcripcion: str, laminas: dict[str, str]) -> str | None:
@@ -77,7 +82,7 @@ def elegir_lamina(transcripcion: str, laminas: dict[str, str]) -> str | None:
     en_cuantas = Counter(p for palabras in cuentas.values() for p in palabras)
     puntajes = []
     for nombre, palabras in cuentas.items():
-        pesos = {p: math.log(1 + len(cuentas) / en_cuantas[p]) for p in palabras}
+        pesos = _pesos(palabras, en_cuantas, len(cuentas))
         total = sum(pesos.values()) or 1
         puntajes.append((sum(v for p, v in pesos.items() if p in dichas) / total, nombre))
     puntajes.sort(reverse=True)
@@ -104,14 +109,15 @@ def preparar(ramo: str, config: dict, ruta_transcripcion: str, slug: str) -> Pat
         partes = []
         texto_programa = _texto_pdf(programa).strip() if programa and programa.is_file() else ""
         if texto_programa:
-            partes.append(f"## Programa del ramo ({programa.name})\n\n{texto_programa}")
+            partes.append(f"## Programa del ramo ({programa.name})\n\n{texto_programa[:MAX_CARACTERES_PROGRAMA]}")
         if elegida:
-            partes.append(f"## Lámina de esta clase ({elegida})\n\n{laminas[elegida].strip()}")
+            partes.append(f"## Lámina de esta clase ({elegida})\n\n"
+                          f"{laminas[elegida].strip()[:MAX_CARACTERES_LAMINA]}")
         if not partes:
             return None
         ruta = dir_pendientes() / f"{slug}_material.txt"
         ruta.parent.mkdir(parents=True, exist_ok=True)
-        ruta.write_text("\n\n".join(partes)[:MAX_CARACTERES], encoding="utf-8")
+        ruta.write_text("\n\n".join(partes), encoding="utf-8")
         return ruta
     except Exception:
         return None
@@ -129,20 +135,32 @@ def linea_para_prompt(ruta: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Laminas y ayudantias para la hoja de una evaluacion
+# Material del profesor para la hoja de una evaluacion
 # --------------------------------------------------------------------------
 #
 # La lamina de una clase casi nunca esta al procesarla: el profesor la sube en la
-# semana. Cuando se arma la hoja de una solemne o del examen, en cambio, ya estan
-# todas. Por eso ahi entran las laminas y las ayudantias de las clases de esa
+# semana. Cuando se arma la hoja de un control, una solemne o el examen, en
+# cambio, ya estan todas. Por eso ahi entra el material de las clases de esa
 # evaluacion (pedido del estudiante el 16-10-2026).
 #
-# Lista blanca: solo estas carpetas, por su nombre exacto, sin subcarpetas. En
-# otras carpetas de los ramos hay un perfil de LinkedIn de una persona y libros
-# enteros (ver onedrive.elegir_archivos), y en la raiz puede haber de todo.
-CARPETAS_DEL_PROFESOR = {"ppts": "lámina", "ayudantias": "ayudantía"}
+# Lista blanca: solo estas carpetas, por su nombre exacto, sin subcarpetas, y
+# solo estos tipos de archivo. En otras carpetas de los ramos hay un perfil de
+# LinkedIn de una persona, libros enteros y planillas con notas (ver
+# onedrive.elegir_archivos), y en la raiz puede haber de todo. El codigo en R se
+# agrego el mismo dia: en un ramo que se trabaja en R, los scripts del profesor
+# son la mitad de la materia.
+CARPETAS_DEL_PROFESOR = {
+    "ppts": ("lámina", (".pdf",)),
+    "ayudantias": ("ayudantía", (".pdf",)),
+    "codigo r": ("código R", (".r", ".rmd", ".qmd")),
+}
+# Para un control, ademas, las pautas y enunciados de controles anteriores que
+# estan en Evaluaciones/. Solo los que dicen control en el nombre ("Control-1",
+# "C1"): las pautas de solemnes las elige onedrive.elegir_archivos.
+CARPETA_EVALUACIONES = "evaluaciones"
+EXTENSIONES_CONTROL = (".pdf", ".r")
 
-# Bajo esto, un PDF no se parece a ninguna clase: no se asigna y no entra.
+# Bajo esto, un archivo no se parece a ninguna clase: no se asigna y no entra.
 # Calibrado el 16-10-2026 con las notas de cuatro ramos: las asignaciones
 # correctas dieron 0,24 a 0,48.
 PUNTAJE_MINIMO_CLASE = 0.2
@@ -151,9 +169,10 @@ PUNTAJE_MINIMO_CLASE = 0.2
 DIAS_FECHA_EN_NOMBRE = 3
 
 
-def _sin_tildes(texto: str) -> str:
-    t = unicodedata.normalize("NFD", texto.lower())
-    return "".join(c for c in t if unicodedata.category(c) != "Mn")
+def _texto(ruta: Path) -> str:
+    if ruta.suffix.lower() == ".pdf":
+        return _texto_pdf(ruta).strip()
+    return ruta.read_text(encoding="utf-8", errors="replace").strip()
 
 
 def _fecha_en_nombre(nombre: str, anio: int) -> date | None:
@@ -178,9 +197,10 @@ def _fecha_en_nombre(nombre: str, anio: int) -> date | None:
 
 def asignar_a_clases(textos: dict[str, str], clases: dict[str, str]) -> dict[str, str | None]:
     """
-    A que clase corresponde cada PDF: {nombre: fecha de la clase, o None}.
-    Primero la fecha del nombre, si cae cerca de una clase. Si no, la clase cuya
-    nota mas se le parece, pesando mas las palabras que estan en pocos PDF del
+    A que clase corresponde cada archivo: {nombre: fecha de la clase, o None}.
+    Primero la fecha del nombre, si cae cerca de una clase: es lo unico que
+    sirve para un PDF escaneado, que no trae texto. Si no, la clase cuya nota
+    mas se le parece, pesando mas las palabras que estan en pocos archivos del
     ramo. Calibrado el 16-10-2026: en cuatro ramos todas las laminas fechadas y
     todas las de un ramo sin fechas cayeron en su clase.
     """
@@ -189,17 +209,17 @@ def asignar_a_clases(textos: dict[str, str], clases: dict[str, str]) -> dict[str
     fechas = sorted(clases)
     anio = int(fechas[0][:4])
     palabras_clase = {f: set(_palabras(t)) for f, t in clases.items()}
-    palabras_pdf = {n: set(_palabras(t)) for n, t in textos.items()}
-    en_cuantos = Counter(p for ps in palabras_pdf.values() for p in ps)
+    palabras_archivo = {n: set(_palabras(t)) for n, t in textos.items()}
+    en_cuantos = Counter(p for ps in palabras_archivo.values() for p in ps)
     asignadas = {}
-    for nombre, palabras in palabras_pdf.items():
-        fecha = _fecha_en_nombre(nombre, anio)
+    for nombre, palabras in palabras_archivo.items():
+        fecha = _fecha_en_nombre(Path(nombre).name, anio)
         if fecha:
             cerca = [f for f in fechas if abs((date.fromisoformat(f) - fecha).days) <= DIAS_FECHA_EN_NOMBRE]
             if cerca:
                 asignadas[nombre] = min(cerca, key=lambda f: abs((date.fromisoformat(f) - fecha).days))
                 continue
-        pesos = {p: math.log(1 + len(palabras_pdf) / en_cuantos[p]) for p in palabras}
+        pesos = _pesos(palabras, en_cuantos, len(palabras_archivo))
         total = sum(pesos.values())
         if not total:
             asignadas[nombre] = None
@@ -210,34 +230,56 @@ def asignar_a_clases(textos: dict[str, str], clases: dict[str, str]) -> dict[str
     return asignadas
 
 
+def _es_de_control(nombre: str) -> bool:
+    palabras = normalizar(Path(nombre).stem).split()
+    return "control" in palabras or any(re.fullmatch(r"c\d", p) for p in palabras)
+
+
 def material_de_la_evaluacion(ramo: str, config: dict, clases: dict[str, str],
-                              en_alcance: set[str]) -> list[dict]:
+                              en_alcance: set[str], es_control: bool = False) -> list[dict]:
     """
-    Las laminas y ayudantias de las clases que entran, con la forma de
-    onedrive.leer_material. `clases` es {fecha: texto de su nota} de todas las
-    clases del ramo, no solo las que entran: una lamina se asigna comparandola
-    con todas, y entra si su clase esta en `en_alcance`. Nunca lanza.
+    El material del profesor de las clases que entran, con la forma de
+    onedrive.leer_material mas la clase a la que se asigno. `clases` es {fecha:
+    texto de su nota} de todas las clases del ramo, no solo las que entran: un
+    archivo se asigna comparandolo con todas, y entra si su clase esta en
+    `en_alcance`. Un PDF escaneado entra solo si la fecha de su nombre lo ubica, y
+    con sin_texto, para que la tarjeta avise que no se pudo leer. Para un control
+    entran ademas los controles anteriores de Evaluaciones/. Nunca lanza.
     """
     try:
         carpeta = carpeta_del_ramo(ramo, config)
         if carpeta is None or not carpeta.is_dir():
             return []
-        candidatos = []
+        candidatos, controles = [], []
         for sub in sorted(carpeta.iterdir()):
-            categoria = CARPETAS_DEL_PROFESOR.get(_sin_tildes(sub.name)) if sub.is_dir() else None
-            if categoria:
-                candidatos += [(categoria, p) for p in sorted(sub.glob("*.pdf"))]
+            if not sub.is_dir():
+                continue
+            clave = normalizar(sub.name).strip()
+            if clave in CARPETAS_DEL_PROFESOR:
+                categoria, extensiones = CARPETAS_DEL_PROFESOR[clave]
+                candidatos += [(categoria, p) for p in sorted(sub.iterdir())
+                               if p.is_file() and p.suffix.lower() in extensiones]
+            elif es_control and clave == CARPETA_EVALUACIONES:
+                controles += [p for p in sorted(sub.iterdir()) if p.is_file()
+                              and p.suffix.lower() in EXTENSIONES_CONTROL and _es_de_control(p.name)]
+
         textos, categorias, vistos = {}, {}, set()
         for categoria, ruta in candidatos:
-            texto = _texto_pdf(ruta).strip()
-            huella = hashlib.md5(texto.encode()).hexdigest()
-            # Un escaneado no trae texto, y no se puede asignar a ninguna clase.
-            if texto and huella not in vistos and ruta.name not in textos:
+            texto = _texto(ruta)
+            huella = hashlib.md5(texto.encode()).hexdigest() if texto else None
+            if huella in vistos:
+                continue  # la misma lamina guardada dos veces entra una
+            if huella:
                 vistos.add(huella)
-                textos[ruta.name], categorias[ruta.name] = texto, categoria
-        asignadas = asignar_a_clases(textos, clases)
-        return [{"categoria": categorias[n], "archivo": n, "texto": textos[n][:MAX_CARACTERES_POR_ARCHIVO],
-                 "sin_texto": False, "clase": f}
-                for n, f in asignadas.items() if f in en_alcance]
+            clave = f"{ruta.parent.name}/{ruta.name}"
+            textos[clave], categorias[clave] = texto, categoria
+        material = [{"categoria": categorias[c], "archivo": Path(c).name,
+                     "texto": textos[c][:MAX_CARACTERES_POR_ARCHIVO], "sin_texto": not textos[c], "clase": f}
+                    for c, f in asignar_a_clases(textos, clases).items() if f in en_alcance]
+        for ruta in controles:
+            texto = _texto(ruta)
+            material.append({"categoria": "control anterior", "archivo": ruta.name,
+                             "texto": texto[:MAX_CARACTERES_POR_ARCHIVO], "sin_texto": not texto})
+        return material
     except Exception:
         return []
