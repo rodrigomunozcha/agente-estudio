@@ -667,8 +667,25 @@ def probar_audio_largo_se_corta_solo() -> None:
                   [x.name for x in trozos] == sorted(x.name for x in trozos))
             total = sum(duracion_audio_segundos(x) or 0 for x in trozos)
             check("no se pierde audio al cortar", abs(total - 50) < 2, f"{total:.1f}s de 50s")
+
+            # Con un silencio cerca del corte, el corte cae ahi y no a mitad de palabra.
+            con_pausa = tmp / "con_pausa.m4a"
+            sp.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=17",
+                    "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=2",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=31",
+                    "-filter_complex", "[0][1][2]concat=n=3:v=0:a=1", "-c:a", "aac", str(con_pausa), "-y"],
+                   check=True, capture_output=True)
+            trozos = tr._partir_audio(str(con_pausa), tmp / "trozos_pausa")
+            primero = duracion_audio_segundos(trozos[0]) or 0
+            check("el primer corte cae en el silencio (17 a 19 s), no en el segundo 20",
+                  17 <= primero <= 19.2, f"{primero:.1f}s")
         finally:
             tr.DURACION_TROZO_SEGUNDOS = original
+
+        check("sin silencio cerca, se corta donde tocaba",
+              tr.elegir_cortes([5.0, 95.0], 120, 40, 10) == [40, 80])
+        check("con silencio cerca, el corte se corre hasta el",
+              tr.elegir_cortes([37.0, 84.0, 89.0], 120, 40, 10) == [37.0, 84.0])
 
         try:
             tr._verificar_parte("", str(audio), 900)

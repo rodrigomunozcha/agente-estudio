@@ -18,6 +18,7 @@ Con el ramo resuelto, el texto queda listo para que la etapa 4 (skill
 transcripciones-a-conocimiento) lo procese.
 """
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -138,21 +139,57 @@ def _borrar_carpeta_de_trozos(carpeta: Path) -> None:
         pass  # no borrar nunca puede costar mas que no limpiar
 
 
+# Cuanto puede correrse un corte para caer en un silencio. Una pausa entre
+# frases aparece cada pocos segundos (2.125 en una clase de 1 h 46 min grabada
+# con el iPhone, medido el 16-10-2026), asi que un minuto sobra.
+MARGEN_CORTE_SEGUNDOS = 60
+
+
+def _silencios(ruta_audio: str) -> list[float]:
+    """El punto medio de cada pausa. Tarda unos 4 s en una clase de dos horas."""
+    r = subprocess.run(
+        ["ffmpeg", "-v", "info", "-i", str(ruta_audio), "-af", "silencedetect=noise=-30dB:d=0.4",
+         "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    inicios = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", r.stderr)]
+    finales = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", r.stderr)]
+    return [(a + b) / 2 for a, b in zip(inicios, finales)]
+
+
+def elegir_cortes(silencios: list[float], duracion: float, trozo: float, margen: float) -> list[float]:
+    """Un corte cada `trozo` segundos, corrido al silencio mas cercano si hay uno a
+    menos de `margen`. El siguiente se cuenta desde el corte real, y ninguno queda
+    a menos de medio trozo del anterior."""
+    cortes, anterior, objetivo = [], 0.0, trozo
+    while objetivo < duracion:
+        cerca = [s for s in silencios if abs(s - objetivo) <= margen and s > anterior + trozo / 2]
+        corte = min(cerca, key=lambda s: abs(s - objetivo)) if cerca else objetivo
+        cortes.append(corte)
+        anterior, objetivo = corte, corte + trozo
+    return cortes
+
+
 def _partir_audio(ruta_audio: str, carpeta: Path) -> list[Path]:
     """
     Corta un audio largo en trozos, sin recodificar.
 
     Los trozos son temporales y se borran al terminar: el archivo original no
-    se toca, y se archiva despues como cualquier otro. El corte cae en un punto
-    cualquiera de la clase, asi que en cada empalme se puede perder una palabra
-    a medias. Con cinco o seis empalmes en una clase de dos horas eso es mucho
-    menos dano que perder la clase entera, que es lo que pasaba antes.
+    se toca, y se archiva despues como cualquier otro. Hasta el 16-10-2026 el
+    corte caia en un segundo cualquiera, y en cada empalme se podia perder una
+    palabra a medias (seis empalmes en una clase de dos horas). Ahora cae en la
+    pausa mas cercana, si hay una a menos de un minuto.
     """
     carpeta.mkdir(parents=True, exist_ok=True)
+    duracion = estado_vivo.duracion_audio_segundos(ruta_audio) or 0
+    cortes = elegir_cortes(_silencios(ruta_audio), duracion, DURACION_TROZO_SEGUNDOS,
+                           MARGEN_CORTE_SEGUNDOS)
     patron = carpeta / f"{Path(ruta_audio).stem} - trozo %03d{Path(ruta_audio).suffix}"
+    cuando = (["-segment_times", ",".join(f"{c:.3f}" for c in cortes)] if cortes
+              else ["-segment_time", str(DURACION_TROZO_SEGUNDOS)])
     subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(ruta_audio), "-f", "segment",
-         "-segment_time", str(DURACION_TROZO_SEGUNDOS), "-c", "copy", str(patron), "-y"],
+        ["ffmpeg", "-v", "error", "-i", str(ruta_audio), "-f", "segment", *cuando,
+         "-c", "copy", str(patron), "-y"],
         check=True, capture_output=True,
     )
     return sorted(carpeta.glob(f"{Path(ruta_audio).stem} - trozo *"))
