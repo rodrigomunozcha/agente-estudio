@@ -181,7 +181,7 @@ def calidad_transcripcion(revision: dict | None) -> dict | None:
     puntaje = t.get("puntaje")
     if not isinstance(puntaje, int) or isinstance(puntaje, bool) or not 1 <= puntaje <= 100:
         return None
-    return {"puntaje": puntaje, "motivo": str(t.get("motivo") or "")[:200]}
+    return {"puntaje": puntaje, "motivo": str(t.get("motivo") or "")[:300]}
 
 
 def leer_calidad(slug: str) -> dict | None:
