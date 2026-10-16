@@ -34,7 +34,8 @@
 // Que queda:
 //   - Input/Reunión Online DD.MM.YY - <tema>.m4a, con todo mezclado. El prefijo
 //     hace que ramo_por_nombre lo reconozca como REUNIÓN sin preguntar, y el
-//     tema llega al analisis, que lo usa para titular la nota.
+//     tema llega al analisis, que lo usa para titular la nota. Si el tema es un
+//     ramo ("Termodinámica online"), entra como clase de ese ramo.
 //   - en modo pantalla, ademas, el video con el audio mezclado en ~/Movies/Reuniones.
 //   - las pistas sueltas, en la carpeta comun "archivos para borrar", donde el
 //     estudiante las borra a mano (regla 2 del CLAUDE.md global). Al principio
@@ -670,8 +671,8 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
     private func preguntarTema() -> String {
         let alerta = NSAlert()
         alerta.messageText = "¿De qué fue la reunión?"
-        alerta.informativeText = "Es opcional. Sirve para reconocerla después y para titular la nota. "
-            + "Si no escribes nada, en 2 minutos sigue sola."
+        alerta.informativeText = "Es opcional. Si fue una clase, escribe solo el nombre del ramo y se "
+            + "procesa como clase, con su hoja. Si no escribes nada, en 2 minutos sigue sola."
         let campo = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
         campo.placeholderString = "Por ejemplo: avance del trabajo grupal"
         alerta.accessoryView = campo

@@ -157,6 +157,21 @@ def ramos_conocidos(config: dict) -> dict[str, str]:
     return {**del_horario, **adicionales}
 
 
+def _ramo_del_tema(tema: str, conocidos: dict[str, str]) -> str:
+    """
+    Una clase online grabada con la grabadora entra como clase si el tema es el
+    ramo ("Termodinámica online"). La del 15-10-2026 entro como reunion y salio un
+    resumen de acciones en vez de las notas y la hoja. Con la misma regla de
+    puntaje de los nombres: "Termodinámica con el grupo" da 0.50 y sigue siendo
+    reunion, porque una reunion de grupo sobre un ramo no es su clase.
+    """
+    util = " ".join(p for p in _palabras_utiles(tema)
+                    if p not in PALABRAS_SIN_CONTENIDO and p != "online")
+    candidatos = [(_puntaje(util, r), r) for r in conocidos if r != RAMO_REUNION]
+    puntaje, ramo = max(candidatos, default=(0.0, RAMO_REUNION))
+    return ramo if puntaje >= UMBRAL_COINCIDENCIA else RAMO_REUNION
+
+
 def resolver(nombres_archivo: list[str], config: dict) -> tuple[str, dict | None]:
     """
     Devuelve (estado, ramo_info). ramo_info trae nombre y perfil_whisper, con
@@ -182,7 +197,7 @@ def resolver(nombres_archivo: list[str], config: dict) -> tuple[str, dict | None
         # REUNIÓN en ramos_adicionales: pregunta_ramo ya la ofrece siempre, y un
         # clon nuevo trae ramos_adicionales vacio (revision del 15-10-2026).
         if limpio.startswith(PREFIJO_REUNION_ONLINE):
-            resultados.append((RECONOCIDO, RAMO_REUNION))
+            resultados.append((RECONOCIDO, _ramo_del_tema(limpio[len(PREFIJO_REUNION_ONLINE):], conocidos)))
             continue
         con_contenido = {
             p for p in _palabras_utiles(limpio) if p not in PALABRAS_SIN_CONTENIDO

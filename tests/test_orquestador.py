@@ -222,6 +222,12 @@ def probar_el_nombre_del_archivo_manda_sobre_el_dia() -> None:
         estado, info = rpn.resolver([nombre], con_reunion)
         check(f"'{nombre[:34]}' -> REUNIÓN",
               estado == rpn.RECONOCIDO and info["nombre"] == "REUNIÓN", f"dio {estado} / {info}")
+    # Una clase online grabada con la grabadora: el tema es el ramo (15-10-2026).
+    for nombre in ["Reunión Online 15.10.26 - Termodinámica online.m4a",
+                   "Reunión Online 15.10.26 - clase de termodinamica.m4a"]:
+        estado, info = rpn.resolver([nombre], con_reunion)
+        check(f"'{nombre[26:]}' -> clase del ramo",
+              estado == rpn.RECONOCIDO and info["nombre"] == "TERMODINÁMICA", f"dio {estado} / {info}")
     estado, info = rpn.resolver(["Reunión Online 14.10.26 - avance.m4a"], config)
     check("sin REUNIÓN en la configuracion, el prefijo igual da REUNIÓN, con el perfil por defecto",
           estado == rpn.RECONOCIDO and info == {"nombre": "REUNIÓN", "perfil_whisper": None},
