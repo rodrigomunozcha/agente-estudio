@@ -52,7 +52,22 @@ MARCADOR_REVISION = "RESULTADO_REVISION:"
 # 10 turnos; esto es el corte por si se queda dando vueltas.
 MAX_TURNS = 25
 
-SYSTEM_PROMPT = """\
+# El criterio del puntaje de 1 a 100, compartido con el revisor de reuniones
+# (reuniones.revisar_reunion): una sola definicion para las dos.
+RUBRICA_PUNTAJE = """\
+Ademas, califica de 1 a 100 cuanto de lo que se dijo se puede recuperar desde la
+transcripcion. No descuentes por nombres o terminos mal escritos que se reconocen
+por el contexto ("Durbin-Waxon" por Durbin-Watson, "Chapiro" por Shapiro): el
+texto que se escribio despues los corrige y no llegan al estudiante. Descuenta
+por lo que no se puede recuperar: pasajes que no se entienden, numeros, fechas o
+formulas dudosos, frases cortadas que cambian el sentido, lo que se mostraba en
+pantalla o en una pizarra y el audio no permite reconstruir, y lineas inventadas
+por el silencio. 90 a 100: se recupera todo. 70 a 89: casi todo, con algunos
+pasajes o numeros dudosos. 50 a 69: hay partes importantes que no se pueden
+reconstruir. Menos de 50: no alcanza para estudiar ni para actuar.
+"""
+
+SYSTEM_PROMPT = f"""\
 Eres el revisor de un sistema que convierte grabaciones de clases universitarias
 en material de estudio. Otro agente ya limpio la transcripcion y escribio dos
 notas. Tu trabajo es comparar esas notas contra la transcripcion cruda y reportar
@@ -87,17 +102,7 @@ hallazgos, los mas graves primero. Para cada uno, se concreto sobre donde esta y
 que hay que hacer: quien te lee va a aplicar la correccion sin volver a leerlo
 todo.
 
-Ademas, califica de 1 a 100 cuanto de la clase se puede recuperar desde la
-transcripcion. No descuentes por nombres o terminos mal escritos que se reconocen
-por el contexto ("Durbin-Waxon" por Durbin-Watson, "Chapiro" por Shapiro): las
-notas los corrigen y no llegan al estudiante. Descuenta por lo que no se puede
-recuperar: pasajes que no se entienden, numeros o formulas dudosos, frases
-cortadas que cambian el sentido, lo que el profesor mostraba en pantalla o en la
-pizarra y el audio no permite reconstruir, y lineas inventadas por el silencio.
-90 a 100: se recupera toda la clase. 70 a 89: casi todo, con algunos pasajes o
-numeros dudosos. 50 a 69: hay partes importantes que no se pueden reconstruir.
-Menos de 50: no alcanza para estudiar.
-
+{RUBRICA_PUNTAJE}
 Escribe en español claro y directo. Sin guion largo. Evita el punto y coma.
 """
 

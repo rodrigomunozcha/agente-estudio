@@ -3072,6 +3072,61 @@ def probar_bot_de_telegram() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_revision_de_reuniones() -> None:
+    """
+    Una reunion o entrevista pasa por un revisor aparte, como una clase: marca al
+    lado de cada punto lo que la transcripcion no respalda, y pone el puntaje de 1
+    a 100. Si el revisor falla, la reunion sigue igual y dice que no se pudo medir.
+    """
+    print("\n== revision de reuniones ==")
+    import asyncio
+    import json as _json
+
+    from orquestador import reuniones as re_
+
+    datos = {"titulo": "T", "resumen": "Se habló del avance.", "decisiones": ["Entregar el viernes", "Usar R"],
+             "acciones": [{"que": "Mandar el informe", "quien": "el estudiante"}],
+             "seguimientos": [], "preguntas_abiertas": [], "investigar": [], "entrevista": None,
+             "calidad_audio": "regular"}
+    revision = {"hallazgos": [{"campo": "decisiones", "indice": 1, "problema": "nadie dijo R"},
+                              {"campo": "acciones", "indice": 0, "problema": "no se dijo quién"},
+                              {"campo": "resumen", "indice": None, "problema": "no se habló del avance"},
+                              {"campo": "decisiones", "indice": 9, "problema": "fuera de rango"}],
+                "transcripcion": {"puntaje": 81, "motivo": "se entiende casi todo"}}
+    linea = f"{re_.MARCA_REVISION_INICIO}\n{_json.dumps(revision)}\n{re_.MARCA_REVISION_FIN}"
+    check("lee la revision entre sus marcas", re_.extraer_revision(linea) == revision)
+    check("una revision rota no se acepta", re_.extraer_revision("nada") is None)
+
+    marcado = re_.aplicar_revision(_json.loads(_json.dumps(datos)), revision)
+    secciones = dict(re_.secciones(marcado))
+    check("la decision sin respaldo queda marcada al lado",
+          secciones["Decisiones"] == ["Entregar el viernes", "Usar R (a verificar: nadie dijo R)"],
+          str(secciones["Decisiones"]))
+    check("la accion tambien", "a verificar: no se dijo quién" in secciones["Acciones"][0])
+    check("y el resumen", "A verificar: no se habló del avance" in secciones["Resumen"])
+    check("el puntaje reemplaza a la calidad del audio",
+          "81/100" in secciones.get("Calidad de la transcripción", "")
+          and "Calidad del audio" not in secciones)
+    check("Telegram tambien trae el puntaje", "81/100" in re_.resumen_telegram(marcado, 0))
+    sin = dict(re_.secciones(re_.aplicar_revision(_json.loads(_json.dumps(datos)), None)))
+    check("sin revision dice que no se pudo medir",
+          "No se pudo medir" in sin.get("Calidad de la transcripción", ""), str(sin))
+    check("una reunion vieja, de antes del revisor, muestra su calidad del audio",
+          dict(re_.secciones(datos)).get("Calidad del audio") == "regular")
+
+    from orquestador import skill_runner as sr
+    originales = (sr.query, re_.registrar_uso)
+    re_.registrar_uso = lambda *a, **kw: None
+    try:
+        sr.query = _falsear_query(_mensajes_sdk(linea, False))
+        r = asyncio.run(re_.revisar_reunion("transcripcion", datos, "slug"))
+        check("el revisor devuelve su revision", r == revision, str(r))
+        sr.query = _falsear_query(_mensajes_sdk("no dije nada", True, api_error_status=529))
+        check("si el revisor falla, no revienta", asyncio.run(re_.revisar_reunion("t", datos, "s")) is None)
+    finally:
+        sr.query, re_.registrar_uso = originales
+
+
 def probar_reuniones() -> None:
     """
     Una grabacion marcada como REUNIÓN no pasa por la skill de clases: deja una

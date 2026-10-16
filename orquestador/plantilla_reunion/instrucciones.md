@@ -36,7 +36,6 @@ exactamente `===REUNION_FIN===`. Nada antes ni después. Con esta forma:
   "titulo": "Tema de la conversación, corto y concreto",
   "una_linea": "Qué fue, en una línea que se lea caminando: con quién y para qué",
   "tipo": "reunion o entrevista",
-  "calidad_audio": "buena, regular o mala, con una frase de por qué",
   "resumen": "De qué se habló, en cuatro a ocho líneas",
   "decisiones": ["Lo que se decidió, una por línea"],
   "acciones": [
