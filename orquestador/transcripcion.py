@@ -56,6 +56,15 @@ def transcribir_trabajo(trabajo: dict, config: dict) -> str:
     # quedaron igual o peor), sacó 21% menos texto y más "Gracias." inventados.
     # El prompt de Whisper solo pesa en las primeras ventanas de 30 segundos. Se
     # descartó: el intento está en _herramientas/respaldos del contenedor.
+    #
+    # El 16-10-2026 se probaron dos cosas más, en tramos de 5 minutos de una clase,
+    # y se descartaron igual (pruebas en material_ramo.py y aquí):
+    #   - Un glosario del programa del ramo repetido en cada ventana de 30 s: arregló
+    #     un término y deformó otros dos ("test" salió "TED"), con 40% más de tiempo.
+    #   - Nivelar el volumen del audio de sala del iPhone antes de Whisper
+    #     (dynaudnorm o loudnorm): ganó en un tramo, perdió en otro y en dos de tres
+    #     se comió entre 10% y 18% de las palabras.
+    # El modelo large-v3 completo, más lento que el turbo, el estudiante lo descartó.
     contexto = trabajo.get("contexto") or ""
     archivos = trabajo["archivos"]
     partes = []
