@@ -93,6 +93,9 @@ El camino de una clase:
    transcripción y hoja copiadas, con el mismo nombre), y `hoja_evaluacion`. La carpeta de
    cada ramo la declara `carpetas_onedrive` en `config.json`. `Procesados/` y `Output/`
    quedan como sala de trabajo. Una clase con `<slug>_skill.json` ya está escrita.
+   Antes de la skill, `material_ramo` deja en `<slug>_material.txt` el programa declarado
+   en `programas` y, si calza con la clase, una lámina de `PPTs/`. Lo leen la skill y el
+   revisor. El revisor además pone el puntaje de 1 a 100 que la hoja muestra arriba.
 5. `notificaciones` avisa en el Mac y repite en Telegram solo los avisos finales.
 
 Una grabación con ramo `REUNIÓN` se desvía a `reuniones.py`. Deja una nota en `Reuniones/`

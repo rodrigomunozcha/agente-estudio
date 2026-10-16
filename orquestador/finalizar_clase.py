@@ -43,7 +43,7 @@ from .hoja_html import (
     tarjeta_lo_que_pidio,
 )
 from .ensayo import es_ensayo
-from . import estado_vivo, evaluaciones, hoja_evaluacion, reuniones
+from . import estado_vivo, evaluaciones, hoja_evaluacion, material_ramo, reuniones
 from .nombres import renumerar_clases_ramo
 from .notificaciones import notificar_aviso, notificar_error, notificar_exito, notificar_progreso
 from .revisor import hallazgos_graves, leer_calidad, revisar
@@ -153,7 +153,8 @@ def _clase_ya_archivada(trabajo_metadata: dict) -> bool:
 
 
 async def _revisar_y_corregir(
-    ruta_texto: str, resultado_skill: dict, ramo: str, vault_dir: str, slug: str
+    ruta_texto: str, resultado_skill: dict, ramo: str, vault_dir: str, slug: str,
+    ruta_material: Path | None = None,
 ) -> dict:
     """
     Etapa 5: un revisor independiente compara las notas contra la transcripcion
@@ -180,7 +181,8 @@ async def _revisar_y_corregir(
     notificar_progreso(estado_vivo.PASO_REVISION, "comprobando contra la transcripcion")
     try:
         with anyio.fail_after(TIMEOUT_REVISION_SEGUNDOS):
-            revision = await revisar(ruta_texto, resultado_skill, ramo, vault_dir, slug)
+            revision = await revisar(ruta_texto, resultado_skill, ramo, vault_dir, slug,
+                                     str(ruta_material) if ruta_material else None)
     except TimeoutError:
         notificar_aviso(
             "La revision tardo demasiado",
@@ -304,22 +306,29 @@ async def procesar_clase_reconocida(trabajo_metadata: dict, config: dict, bitaco
     # transcripcion completa). Visto en vivo con SISTEMAS Y ESTRUCTURA
     # DIGITAL (04-08-2026, ver _clase_ya_archivada mas abajo).
     ruta_skill_json = dir_pendientes() / f"{slug}_skill.json"
+    # El programa del ramo y la lamina de la clase, si ya esta (ver
+    # material_ramo.py). Se arma aunque la skill ya haya corrido: el revisor
+    # tambien lo usa. Son segundos de pdftotext, sin modelo.
+    ruta_material = material_ramo.preparar(ramo, config, ruta_texto, slug)
     if ruta_skill_json.exists():
         notificar_progreso(estado_vivo.PASO_SKILL, "ya estaba analizada, retomando desde ahi")
         resultado_skill = json.loads(ruta_skill_json.read_text(encoding="utf-8"))
     else:
         notificar_progreso(estado_vivo.PASO_SKILL, "puede tardar unos minutos")
         datos_evaluaciones = _cargar_evaluaciones()
+        extras = [
+            evaluaciones.resumen_para_skill(datos_evaluaciones, ramo, trabajo_metadata.get("fecha", ""))
+            if datos_evaluaciones else "",
+            material_ramo.linea_para_prompt(str(ruta_material)) if ruta_material else "",
+        ]
         with anyio.fail_after(TIMEOUT_SKILL_SEGUNDOS):
             resultado_skill = await aplicar_skill(
                 ruta_texto, ramo, vault_dir, slug, str(carpeta_ramo),
-                nota_extra=evaluaciones.resumen_para_skill(
-                    datos_evaluaciones, ramo, trabajo_metadata.get("fecha", ""))
-                if datos_evaluaciones else "",
+                nota_extra="\n\n".join(e for e in extras if e),
             )
 
     resultado_skill = await _revisar_y_corregir(
-        ruta_texto, resultado_skill, ramo, vault_dir, slug
+        ruta_texto, resultado_skill, ramo, vault_dir, slug, ruta_material
     )
 
     # Recien aca, porque este es el punto donde convergen los tres caminos que

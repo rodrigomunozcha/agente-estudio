@@ -87,12 +87,16 @@ hallazgos, los mas graves primero. Para cada uno, se concreto sobre donde esta y
 que hay que hacer: quien te lee va a aplicar la correccion sin volver a leerlo
 todo.
 
-Ademas, califica la transcripcion misma de 1 a 100, aparte de las notas. Mira si
-los terminos tecnicos del ramo salen bien escritos o deformados, si las frases
-quedan cortadas, si hay tramos que no se entienden y si hay lineas inventadas
-por el silencio ("Gracias." sueltos). 90 a 100: se entiende todo y los
-terminos salen bien. 60 a 89: se sigue la clase, con terminos deformados o
-tramos dudosos. 59 o menos: hay partes de la clase que no se pueden recuperar.
+Ademas, califica de 1 a 100 cuanto de la clase se puede recuperar desde la
+transcripcion. No descuentes por nombres o terminos mal escritos que se reconocen
+por el contexto ("Durbin-Waxon" por Durbin-Watson, "Chapiro" por Shapiro): las
+notas los corrigen y no llegan al estudiante. Descuenta por lo que no se puede
+recuperar: pasajes que no se entienden, numeros o formulas dudosos, frases
+cortadas que cambian el sentido, lo que el profesor mostraba en pantalla o en la
+pizarra y el audio no permite reconstruir, y lineas inventadas por el silencio.
+90 a 100: se recupera toda la clase. 70 a 89: casi todo, con algunos pasajes o
+numeros dudosos. 50 a 69: hay partes importantes que no se pueden reconstruir.
+Menos de 50: no alcanza para estudiar.
 
 Escribe en español claro y directo. Sin guion largo. Evita el punto y coma.
 """
@@ -104,6 +108,7 @@ def _construir_prompt(
     ruta_aprendizaje: str,
     ramo: str,
     conceptos: list[dict],
+    ruta_material: str | None = None,
 ) -> str:
     conceptos_texto = "\n".join(
         f"  {i}. {c.get('concepto', '?')}: {c.get('por_que', '')}"
@@ -112,10 +117,15 @@ def _construir_prompt(
 
     return (
         f"Revisa el material de una clase del ramo {ramo}.\n\n"
-        "Lee estos tres archivos completos antes de opinar:\n"
+        "Lee estos archivos completos antes de opinar:\n"
         f"1. Transcripcion cruda (la unica fuente de verdad): {ruta_transcripcion}\n"
         f"2. Nota de fuente limpia: {ruta_fuente}\n"
-        f"3. Nota de aprendizaje (la que se condensa en la hoja de repaso): {ruta_aprendizaje}\n\n"
+        f"3. Nota de aprendizaje (la que se condensa en la hoja de repaso): {ruta_aprendizaje}\n"
+        + (f"4. Material del profesor (programa del ramo y, si se encontro, la lamina de la "
+           f"clase): {ruta_material}. Sirve para comprobar nombres y formulas. Lo que esta solo "
+           "en el material y la nota presenta como dicho en clase es un hallazgo.\n"
+           if ruta_material else "")
+        + "\n"
         "Los cinco conceptos que el agente reporto como los mas repetidos por el "
         f"profe:\n{conceptos_texto}\n\n"
         "Cuando termines, la ultima linea de tu respuesta debe ser exactamente esta, "
@@ -159,7 +169,10 @@ def calidad_transcripcion(revision: dict | None) -> dict | None:
     sin modelo, contando palabras por minuto, frases cortas y "Gracias.", y no
     separaba la grabacion buena de la mala de la clase del 15-10-2026. Lo que
     las separaba eran los terminos tecnicos deformados, y eso solo lo ve un
-    lector. Si el valor no es un entero de 1 a 100, no se muestra nada.
+    lector. Desde el 16-10-2026 mide cuanto de la clase se recupera, no la
+    ortografia: la primera version dio 62 a una clase cuyos nombres mal escritos
+    las notas ya corregian todos. Si el valor no es un entero de 1 a 100, no se
+    muestra nada.
     Iba de 1 a 10 y el estudiante pidio 1 a 100 (16-10-2026).
     """
     t = (revision or {}).get("transcripcion")
@@ -196,6 +209,7 @@ async def revisar(
     ramo: str,
     vault_dir: str,
     slug: str,
+    ruta_material: str | None = None,
 ) -> dict:
     """
     Devuelve {"veredicto": ..., "hallazgos": [...]}.
@@ -212,6 +226,7 @@ async def revisar(
         resultado_skill.get("aprendizaje", ""),
         ramo,
         resultado_skill.get("conceptos_repetidos") or [],
+        ruta_material,
     )
 
     options = ClaudeAgentOptions(

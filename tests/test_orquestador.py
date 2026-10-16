@@ -1167,6 +1167,68 @@ def probar_error_tardio_no_tira_el_trabajo() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def probar_material_del_profesor() -> None:
+    """
+    La skill y el revisor reciben el programa del ramo y la lamina de la clase,
+    si se encuentra. La lamina se elige por parecido con la transcripcion, y en
+    la duda no va ninguna: una lamina de otra clase confunde mas que ayudar.
+    """
+    print("\n== material del profesor: programa y lamina de la clase ==")
+    from orquestador import material_ramo as m, revisor, skill_runner
+
+    laminas = {
+        "clase-entalpia.pdf": "entalpia calor reaccion exotermica endotermica calorimetro capacidad",
+        "clase-entropia.pdf": "entropia desorden segunda reversible irreversible carnot",
+        "clase-gases.pdf": "presion volumen temperatura ideales boyle charles",
+    }
+    clase = "hoy vemos entalpia, el calor de una reaccion exotermica y el calorimetro con su capacidad"
+    check("elige la lamina que calza con la clase", m.elegir_lamina(clase, laminas) == "clase-entalpia.pdf")
+    check("en la duda no elige ninguna",
+          m.elegir_lamina("hoy vemos entalpia y entropia, calor y desorden", laminas) is None)
+    check("sin laminas no elige nada", m.elegir_lamina(clase, {}) is None)
+
+    tmp = Path(tempfile.mkdtemp(prefix="material_"))
+    ramo_dir = tmp / "Termodinamica"
+    (ramo_dir / "PPTs").mkdir(parents=True)
+    (ramo_dir / "Programa-Termodinamica.pdf").write_text("x")
+    # En la raiz puede haber de todo: nunca se lee, aunque calce con la clase.
+    (ramo_dir / "mi contrato entalpia calor reaccion.pdf").write_text("x")
+    for nombre in laminas:
+        (ramo_dir / "PPTs" / nombre).write_text("x")
+    (tmp / "clase.txt").write_text(clase, encoding="utf-8")
+    original = m._texto_pdf
+    leidos = []
+    m._texto_pdf = lambda ruta: (leidos.append(ruta.name) or
+                                 ("Unidad 1: entalpia y entropia" if "Programa" in ruta.name else laminas[ruta.name]))
+    usar_dir_pendientes(tmp)
+    try:
+        config = {"carpetas_onedrive": {"TERMODINÁMICA": str(ramo_dir)}}
+        ruta = m.preparar("TERMODINÁMICA", config, str(tmp / "clase.txt"), "slug1")
+        texto = ruta.read_text(encoding="utf-8") if ruta else ""
+        check("sin programa declarado en config.json no entra ninguno", "Unidad 1" not in texto, texto[:200])
+        check("la lamina elegida entra igual", "calorimetro" in texto and "carnot" not in texto, texto[:200])
+        check("la raiz del ramo no se abre", not any("contrato" in n for n in leidos), str(leidos))
+        config["programas"] = {"TERMODINÁMICA": "Programa-Termodinamica.pdf"}
+        texto = m.preparar("TERMODINÁMICA", config, str(tmp / "clase.txt"), "slug1").read_text(encoding="utf-8")
+        check("con el programa declarado, entra", "Unidad 1" in texto and "calorimetro" in texto, texto[:200])
+        check("sin carpeta del ramo no hay material", m.preparar("OTRO", config, str(tmp / "clase.txt"), "s2") is None)
+    finally:
+        m._texto_pdf = original
+        usar_dir_pendientes(None)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    linea = m.linea_para_prompt("/x/slug1_material.txt")
+    check("la skill recibe la ruta y la regla del aporte externo",
+          "/x/slug1_material.txt" in linea and "aporte externo" in linea)
+    prompt = revisor._construir_prompt("t.txt", "f.md", "a.md", "R", [], "/x/slug1_material.txt")
+    check("el revisor tambien lo recibe", "/x/slug1_material.txt" in prompt)
+    check("y sin material el revisor no lo menciona",
+          "Material" not in revisor._construir_prompt("t.txt", "f.md", "a.md", "R", []))
+    check("el puntaje no descuenta nombres que se reconocen por el contexto",
+          "Durbin-Waxon" in revisor.SYSTEM_PROMPT)
+    check("la skill sigue recibiendo su prompt", "Ramo: R" in skill_runner._construir_prompt("t", "R", "c", linea))
+
+
 def probar_revision_fallida_no_dice_aprobado() -> None:
     """
     El revisor es la unica barrera antes de que el material entre al vault. Una
