@@ -757,9 +757,25 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
             let nivelar = pistas[i].url == sesion.audioSistema ? "" : "dynaudnorm,"
             return "[\(i):a]\(nivelar)adelay=delays=\(Int(pistas[i].segundo * 1000)):all=1[p\(i)]"
         }
-        let mezcla = retrasos.joined(separator: ";") + ";"
-            + pistas.indices.map { "[p\($0)]" }.joined()
-            + "amix=inputs=\(pistas.count):duration=longest:normalize=0[a]"
+        // Tu voz va en el canal izquierdo y la llamada en el derecho, sin
+        // mezclarlas: asi el pipeline transcribe cada una por su lado y marca
+        // cada frase como "Tú" u "Otros" (transcripcion.transcribir_dos_pistas).
+        // Hasta el 16-10-2026 iba todo mezclado en un canal y el analisis de una
+        // reunion no podia saber quien dijo que. Sin una de las dos, va mono.
+        // El canal de tu voz se rellena con silencio (apad) y amerge corta al
+        // terminar la llamada, que dura toda la grabacion.
+        let sistema = pistas.indices.filter { pistas[$0].url == sesion.audioSistema }
+        let microfonos = pistas.indices.filter { pistas[$0].url != sesion.audioSistema }
+        let dosPistas = !sistema.isEmpty && !microfonos.isEmpty
+        var mezcla = retrasos.joined(separator: ";") + ";"
+        if dosPistas {
+            mezcla += microfonos.map { "[p\($0)]" }.joined()
+                + (microfonos.count > 1 ? "amix=inputs=\(microfonos.count):duration=longest:normalize=0," : "")
+                + "apad[tu];[p\(sistema[0])]aformat=channel_layouts=mono[otros];[tu][otros]amerge=inputs=2[a]"
+        } else {
+            mezcla += pistas.indices.map { "[p\($0)]" }.joined()
+                + "amix=inputs=\(pistas.count):duration=longest:normalize=0[a]"
+        }
 
         // Se escribe con extension .part y se renombra al final: deteccion solo
         // mira audios, y asi nunca ve un .m4a a medio escribir.
@@ -767,7 +783,8 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         let parcial = destino.appendingPathExtension("part")
         let entradas = pistas.flatMap { ["-i", $0.url.path] }
         guard correr(ffmpeg, ["-y"] + entradas + ["-filter_complex", mezcla, "-map", "[a]",
-                                                   "-ac", "1", "-c:a", "aac", "-b:a", "96k", "-f", "ipod", parcial.path]),
+                                                   "-ac", dosPistas ? "2" : "1", "-c:a", "aac",
+                                                   "-b:a", dosPistas ? "128k" : "96k", "-f", "ipod", parcial.path]),
               (try? FileManager.default.moveItem(at: parcial, to: destino)) != nil else {
             avisar("No se pudo mezclar el audio", pistasGuardadas(sesion))
             return
@@ -780,8 +797,9 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
             let peliculas = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies/Reuniones")
             try? FileManager.default.createDirectory(at: peliculas, withIntermediateDirectories: true)
             let video = libre(peliculas, base, "mov")
-            if !correr(ffmpeg, ["-y", "-i", sesion.video.path, "-i", destino.path,
-                                "-map", "0:v", "-map", "1:a", "-c", "copy", video.path]) {
+            // El audio del video va mono: con tu voz en un solo oido no se escucha bien.
+            if !correr(ffmpeg, ["-y", "-i", sesion.video.path, "-i", destino.path, "-map", "0:v", "-map", "1:a",
+                                "-c:v", "copy", "-c:a", "aac", "-ac", "1", video.path]) {
                 avisar("No se pudo armar el video", "El video sin audio quedó en \(sesion.video.path).")
             }
         }

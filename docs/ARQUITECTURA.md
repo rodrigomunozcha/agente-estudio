@@ -62,12 +62,13 @@ con las rutas de este Mac.
 
 La grabadora (`grabadora/Grabadora.swift`) graba el audio del sistema con un tap de Core
 Audio, el micrófono con AVAudioEngine (un tramo nuevo cada vez que macOS cambia de
-micrófono) y, si se pide, la pantalla con ScreenCaptureKit. Al detener, mezcla todo con
-ffmpeg y deja `Reunión Online DD.MM.YY - <tema>.m4a` en Input, donde lo toma el vigilante.
+micrófono) y, si se pide, la pantalla con ScreenCaptureKit. Al detener, deja tu voz en el
+canal izquierdo y la llamada en el derecho, con ffmpeg, y deja `Reunión Online DD.MM.YY - <tema>.m4a` en Input, donde lo toma el vigilante.
 `ramo_por_nombre` reconoce el prefijo como REUNIÓN, salvo que el tema sea un ramo:
 ahí entra como clase de ese ramo. Las pistas sueltas quedan en
 `archivos para borrar/Agente estudio - pistas de la grabadora/`. Se compila con
 `boton_app/compilar_apps.sh` y se instala con `bash launchd/instalar_grabadora.sh`.
+`transcripcion` transcribe cada canal aparte y marca cada frase como "Tú" u "Otros".
 La pausa (solo en modo audio) deja de escribir sin cerrar nada, y los tramos se ubican
 en la mezcla con un cronómetro que descuenta las pausas. Cada 15 minutos de pausa avisa
 en el Mac y por Telegram. Su prueba es `Grabadora --probar`, que corre al compilar.

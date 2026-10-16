@@ -1305,6 +1305,65 @@ def probar_laminas_en_la_hoja_de_evaluacion() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def probar_tu_y_otros_en_la_grabadora() -> None:
+    """
+    La grabadora del Mac deja tu microfono en el canal izquierdo y la llamada en
+    el derecho. Se transcriben por separado y cada frase queda marcada como "Tú"
+    u "Otros". Si tu microfono no grabo nada, sale como antes, sin marcas.
+    """
+    print("\n== Tú y Otros en lo que graba la grabadora ==")
+    import subprocess as sp
+
+    from orquestador import transcripcion as tr
+
+    otros = [(0.0, "Hoy vemos los supuestos."), (4.0, "Empecemos por la normalidad."),
+             (20.0, "Buena pregunta, la respuesta es no.")]
+    tu = [(4.5, "Empecemos por la normalidad."), (12.0, "Profe, ¿y si la muestra es chica?")]
+    texto = tr.mezclar_por_tiempo(tu, otros)
+    check("cada turno lleva quien habla, en orden",
+          texto.splitlines()[1:] == ["Otros: Hoy vemos los supuestos.", "Empecemos por la normalidad.",
+                                     "Tú: Profe, ¿y si la muestra es chica?",
+                                     "Otros: Buena pregunta, la respuesta es no."], texto)
+    check("lo que tu micrófono repite de los parlantes no se duplica", texto.count("normalidad") == 1)
+    check("la primera línea explica las marcas", "Tú" in texto.splitlines()[0] and "Otros" in texto.splitlines()[0])
+
+    tmp = Path(tempfile.mkdtemp())
+    original = tr._transcribir_con_tiempos
+    try:
+        estereo = tmp / "Reunión Online 16.10.26 - prueba.m4a"
+        sp.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=300:duration=6",
+                "-f", "lavfi", "-i", "sine=frequency=500:duration=6",
+                "-filter_complex", "[0][1]amerge=inputs=2", "-c:a", "aac", str(estereo), "-y"],
+               check=True, capture_output=True)
+        mudo = tmp / "Reunión Online 16.10.26 - sin voz.m4a"
+        sp.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono:d=6",
+                "-f", "lavfi", "-i", "sine=frequency=500:duration=6",
+                "-filter_complex", "[0][1]amerge=inputs=2", "-c:a", "aac", str(mudo), "-y"],
+               check=True, capture_output=True)
+        check("un estéreo de la grabadora se reconoce", tr.es_de_dos_pistas(str(estereo)))
+        check("uno del iPhone no", not tr.es_de_dos_pistas(str(tmp / "Clase 16.10.26.m4a")))
+
+        def falsa(transcribe, ruta, perfil, contexto, duracion, verificar):
+            if Path(ruta).stem.endswith("otros"):
+                return [(t, t + 2, f) for t, f in otros]
+            return [(1.0, 3.0, "Profe, ¿y si la muestra es chica?")]
+        tr._transcribir_con_tiempos = falsa
+        texto = tr.transcribir_dos_pistas(None, str(estereo), "es-chile", "", 6, "x")
+        check("con voz en tu micrófono, sale con marcas", "Tú: Profe" in texto, texto[:200])
+
+        # En los silencios de tu microfono Whisper inventa "Gracias.": paso en la
+        # prueba en vivo del 16-10-2026, siete veces en cuatro minutos.
+        check("una frase tuya que cae en silencio no entra",
+              tr.frases_con_voz([(1.0, 3.0, "Hola"), (10.0, 11.0, "Gracias.")], [(0.5, 4.0)])
+              == [(1.0, "Hola")])
+        texto = tr.transcribir_dos_pistas(None, str(mudo), "es-chile", "", 6, "x")
+        check("sin voz en tu micrófono, sale como antes, sin marcas",
+              "Tú" not in texto and "Hoy vemos los supuestos." in texto, texto[:200])
+    finally:
+        tr._transcribir_con_tiempos = original
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def probar_revision_fallida_no_dice_aprobado() -> None:
     """
     El revisor es la unica barrera antes de que el material entre al vault. Una
