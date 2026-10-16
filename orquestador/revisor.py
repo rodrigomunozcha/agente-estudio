@@ -87,6 +87,13 @@ hallazgos, los mas graves primero. Para cada uno, se concreto sobre donde esta y
 que hay que hacer: quien te lee va a aplicar la correccion sin volver a leerlo
 todo.
 
+Ademas, califica la transcripcion misma de 1 a 10, aparte de las notas. Mira si
+los terminos tecnicos del ramo salen bien escritos o deformados, si las frases
+quedan cortadas, si hay tramos que no se entienden y si hay lineas inventadas
+por el silencio ("Gracias." sueltos). 9 o 10: se entiende todo y los terminos
+salen bien. 6 a 8: se sigue la clase, con terminos deformados o tramos dudosos.
+5 o menos: hay partes de la clase que no se pueden recuperar.
+
 Escribe en español claro y directo. Sin guion largo. Evita el punto y coma.
 """
 
@@ -115,7 +122,8 @@ def _construir_prompt(
         "sin nada mas en esa linea y con JSON valido en una sola linea:\n"
         'RESULTADO_REVISION: {"veredicto": "aprobado" | "corregir", "hallazgos": '
         '[{"gravedad": "alta" | "media", "donde": "nota y seccion exacta", '
-        '"problema": "que esta mal y por que", "correccion": "que hay que hacer"}]}\n\n'
+        '"problema": "que esta mal y por que", "correccion": "que hay que hacer"}], '
+        '"transcripcion": {"puntaje": 1 a 10, "motivo": "una frase con lo que mas pesa"}}\n\n'
         'Usa "corregir" solo si hay al menos un hallazgo de gravedad alta. '
         'Si todo lo que encontraste es de gravedad media, el veredicto es "aprobado" '
         "y los hallazgos quedan igual en la lista, como registro."
@@ -142,6 +150,32 @@ def _parsear_revision(texto: str) -> dict | None:
             )
         return revision
     return None
+
+
+def calidad_transcripcion(revision: dict | None) -> dict | None:
+    """
+    El puntaje que la hoja muestra arriba, como guia. Lo da el revisor porque
+    ya lee la transcripcion entera: no cuesta una llamada mas. Se probo medirlo
+    sin modelo, contando palabras por minuto, frases cortas y "Gracias.", y no
+    separaba la grabacion buena de la mala de la clase del 15-10-2026. Lo que
+    las separaba eran los terminos tecnicos deformados, y eso solo lo ve un
+    lector. Si el valor no es un entero de 1 a 10, no se muestra nada.
+    """
+    t = (revision or {}).get("transcripcion")
+    if not isinstance(t, dict):
+        return None
+    puntaje = t.get("puntaje")
+    if not isinstance(puntaje, int) or isinstance(puntaje, bool) or not 1 <= puntaje <= 10:
+        return None
+    return {"puntaje": puntaje, "motivo": str(t.get("motivo") or "")[:200]}
+
+
+def leer_calidad(slug: str) -> dict | None:
+    ruta = dir_pendientes() / f"{slug}_revision.json"
+    try:
+        return calidad_transcripcion(json.loads(ruta.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return None
 
 
 def hallazgos_graves(revision: dict) -> list[dict]:

@@ -46,7 +46,7 @@ from .ensayo import es_ensayo
 from . import estado_vivo, evaluaciones, hoja_evaluacion, reuniones
 from .nombres import renumerar_clases_ramo
 from .notificaciones import notificar_aviso, notificar_error, notificar_exito, notificar_progreso
-from .revisor import hallazgos_graves, revisar
+from .revisor import hallazgos_graves, leer_calidad, revisar
 from .skill_runner import aplicar_skill, corregir_con_revision, normalizar_resultado
 
 # Topes de tiempo por etapa. El tope de turnos no alcanza: una llamada al SDK
@@ -354,6 +354,7 @@ async def procesar_clase_reconocida(trabajo_metadata: dict, config: dict, bitaco
         trabajo, titulo, cuerpo,
         tarjeta_lo_que_pidio(texto_aprendizaje, resultado_skill.get("llamados")),
         Path(resultado_skill.get("aprendizaje") or "").name, motivo, slug,
+        calidad=leer_calidad(slug),
     )
 
     # El unico tramo que no se puede cortar por la mitad: mover el audio lo

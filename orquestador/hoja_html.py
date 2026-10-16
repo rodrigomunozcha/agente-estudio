@@ -72,6 +72,7 @@ from claude_agent_sdk import (
 
 from .config import cargar_config, dir_pendientes
 from .nombres import nombre_base
+from .revisor import leer_calidad
 from .skill_runner import CLI_PATH, PROJECT_ROOT, consultar, describir_error_sdk, normalizar_resultado
 from .uso import registrar_uso
 
@@ -464,7 +465,8 @@ def _css_fuentes() -> str:
 
 
 def envolver_documento(titulo_pestana: str, linea_ramo: str, titulo: str, subtitulo: str,
-                       leyenda: str, tarjeta: str, cuerpo: str, fuente_del_pie: str) -> str:
+                       leyenda: str, tarjeta: str, cuerpo: str, fuente_del_pie: str,
+                       calidad: str = "") -> str:
     """El esqueleto comun de las hojas: estilos, fuentes incrustadas, cabecera y
     pie. Los textos llegan ya escapados, salvo titulo_pestana y titulo."""
     e = lambda s: html.escape(str(s or ""), quote=True)  # noqa: E731
@@ -492,6 +494,7 @@ def envolver_documento(titulo_pestana: str, linea_ramo: str, titulo: str, subtit
   <h1>{e(titulo)}</h1>
   <p class="sub">{subtitulo}</p>
   <p class="leyenda"><b>Cada afirmación dice de dónde sale.</b> {leyenda}</p>
+  {calidad}
 </header>
 {tarjeta}
 {cuerpo}
@@ -513,6 +516,7 @@ def armar_documento(
     nombre_nota: str = "",
     motivo_fallo: str | None = None,
     slug: str = "",
+    calidad: dict | None = None,
 ) -> str:
     e = lambda s: html.escape(str(s or ""), quote=True)  # noqa: E731
     ramo = trabajo.get("ramo") or ""
@@ -535,7 +539,19 @@ def armar_documento(
         f"Fuente: las notas procesadas de la clase del {fecha}{origen_nota}, revisadas contra la "
         "grabación. Lo marcado con <b>+</b> es agregado y se señala uno por uno para que no se "
         "confunda con materia dictada.",
+        _linea_calidad(calidad),
     )
+
+
+def _linea_calidad(calidad: dict | None) -> str:
+    """Ver revisor.calidad_transcripcion. Sin puntaje se dice, no se omite: una
+    hoja sin la linea no se distingue de una de antes de que existiera."""
+    if not calidad:
+        return ('<p class="leyenda"><b>Transcripción:</b> no se pudo medir su calidad '
+                "en esta clase.</p>")
+    motivo = html.escape(calidad["motivo"], quote=True)
+    return (f'<p class="leyenda"><b>Transcripción: {calidad["puntaje"]}/10</b> '
+            f"(guía, no definitiva). {motivo}</p>")
 
 
 def ruta_de_hoja(trabajo: dict, titulo: str, config: dict, sufijo: str = "") -> Path:
@@ -729,6 +745,7 @@ async def generar_para_clase(slug: str, config: dict, pisar: bool = False) -> tu
     documento = armar_documento(
         trabajo, titulo, cuerpo, tarjeta_lo_que_pidio(aprendizaje, resultado.get("llamados")),
         Path(resultado.get("aprendizaje") or "").name, motivo, slug,
+        calidad=leer_calidad(slug),
     )
     ruta = ruta_de_hoja(trabajo, titulo, config)
     if ruta.exists() and not pisar:
