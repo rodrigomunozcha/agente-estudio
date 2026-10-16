@@ -1008,6 +1008,57 @@ def _mensajes_sdk(texto: str, is_error: bool, **extra):
     ]
 
 
+def probar_resultado_mal_escrito_se_pide_de_nuevo() -> None:
+    """
+    La clase del 15-10-2026 se dio por fallida con las tres notas escritas: a la
+    linea RESULTADO_ORQUESTADOR le faltaba una llave de cierre. Con la linea
+    mal escrita se le pide a la misma sesion que la repita, sin rehacer la clase.
+    """
+    print("\n== un resultado con JSON roto se pide de nuevo a la misma sesion ==")
+    import asyncio
+
+    from orquestador import skill_runner
+
+    ROTA = 'RESULTADO_ORQUESTADOR: {"titulo": "Tema", "llamados": {"avisos": []}'
+    BUENA = 'RESULTADO_ORQUESTADOR: {"titulo": "Tema", "llamados": {"avisos": []}}'
+    llamadas = []
+
+    def falsa(respuestas):
+        async def _query(*, prompt, options):
+            llamadas.append(options)
+            for m in _mensajes_sdk(respuestas[len(llamadas) - 1], False):
+                yield m
+        return _query
+
+    originales = (skill_runner.query, skill_runner.registrar_uso)
+    tmp = Path(tempfile.mkdtemp(prefix="pendientes_falsos_"))
+    usar_dir_pendientes(tmp)
+    skill_runner.registrar_uso = lambda *a, **kw: None
+    try:
+        skill_runner.query = falsa([ROTA, BUENA])
+        r = asyncio.run(skill_runner.aplicar_skill(
+            "t.txt", "TERMODINAMICA", "/tmp/vault", "slug1", "/tmp/vault/E"))
+        check("la clase se salva con la linea repetida", r["titulo"] == "Tema", str(r))
+        check("la segunda llamada retoma la sesion de la primera",
+              len(llamadas) == 2 and llamadas[1].resume == "sesion-1", str(len(llamadas)))
+        check("y no puede escribir en el vault",
+              "Write" in llamadas[1].disallowed_tools and "Edit" in llamadas[1].disallowed_tools)
+
+        # Si la skill no emitio la linea, no hay nada que repetir: falla como antes.
+        llamadas.clear()
+        skill_runner.query = falsa(["no reporte nada"])
+        try:
+            asyncio.run(skill_runner.aplicar_skill(
+                "t.txt", "TERMODINAMICA", "/tmp/vault", "slug2", "/tmp/vault/E"))
+            check("sin linea no se reintenta", False, "no revento")
+        except ValueError:
+            check("sin linea no se reintenta", len(llamadas) == 1, str(len(llamadas)))
+    finally:
+        skill_runner.query, skill_runner.registrar_uso = originales
+        usar_dir_pendientes(None)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def probar_error_tardio_no_tira_el_trabajo() -> None:
     """
     Un 429 o un 529 al final de una corrida ya terminada no puede costar la

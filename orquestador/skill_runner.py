@@ -441,7 +441,15 @@ async def aplicar_skill(
                 # criterio que ya usaban revisar() y corregir_con_revision().
                 error_sdk = describir_error_sdk(mensaje)
 
-    resultado = _parsear_resultado("\n".join(partes))
+    texto = "\n".join(partes)
+    resultado = _parsear_resultado(texto)
+    if resultado is None and MARCADOR_RESULTADO in texto and session_id:
+        # La linea vino pero no es JSON valido. Paso en la clase del
+        # 15-10-2026: las tres notas escritas y a la linea le faltaba una llave
+        # de cierre, asi que la clase se dio por fallida y no hubo hoja.
+        # Repetirla en la misma sesion es un turno sobre el cache, rehacer la
+        # clase eran 12 turnos.
+        resultado = await _pedir_resultado_de_nuevo(session_id, slug)
     if resultado is None:
         raise ValueError(
             "La skill no reporto RESULTADO_ORQUESTADOR, no se puede ubicar "
@@ -463,6 +471,39 @@ async def aplicar_skill(
     resultado["session_id"] = session_id
     _guardar_resultado_skill(slug, resultado)
     return resultado
+
+
+async def _pedir_resultado_de_nuevo(session_id: str, slug: str) -> dict | None:
+    """
+    Retoma la sesion de la skill solo para que repita la linea de resultado.
+    Sin ninguna herramienta: las notas ya estan escritas y aqui no se tocan.
+    """
+    options = ClaudeAgentOptions(
+        cwd=str(PROJECT_ROOT),
+        setting_sources=[],
+        resume=session_id,
+        allowed_tools=[],
+        disallowed_tools=["Bash", "Write", "Edit", "Read", "Glob", "Grep"],
+        cli_path=str(CLI_PATH),
+        max_turns=1,
+    )
+    partes = []
+    try:
+        async for mensaje in consultar(
+            prompt="La linea RESULTADO_ORQUESTADOR que emitiste no es JSON valido: "
+                   "le falta o le sobra una llave o un corchete. Emitela de nuevo, "
+                   "completa, en una sola linea y con el mismo contenido. No toques "
+                   "las notas.",
+            options=options,
+        ):
+            if isinstance(mensaje, AssistantMessage):
+                partes.extend(b.text for b in mensaje.content if isinstance(b, TextBlock))
+            elif isinstance(mensaje, ResultMessage):
+                registrar_uso("resultado", slug, mensaje)
+    except Exception:
+        # Si esto falla, la clase falla con el mismo error que antes.
+        return None
+    return _parsear_resultado("\n".join(partes))
 
 
 def _construir_prompt_correccion(hallazgos: list[dict]) -> str:
