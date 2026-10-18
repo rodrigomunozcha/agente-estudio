@@ -13,8 +13,10 @@ elige un ramo. finalizar_clase manda aqui en vez de a la skill de clases.
 
 Que deja:
   - una nota en la boveda, en Reuniones/,
-  - un .docx en "2 Areas/Reuniones post Claude/" de OneDrive, con el audio comprimido y
-    la transcripcion al lado y con el mismo nombre (archivado.reunir_en),
+  - un .docx en su propia carpeta dentro de "2 Areas/Reuniones Entrevistas post Claude/"
+    de OneDrive, con el audio comprimido y la transcripcion al lado y con el mismo nombre
+    (archivado.reunir_en). Una carpeta por reunion la pidio el estudiante el 18-10-2026,
+    para despues agruparlas por situacion, como la practica,
   - un resumen por Telegram: una linea de que fue, las acciones con su fecha y los
     seguimientos, con el .docx adjunto,
   - las acciones con fecha, anotadas para que la secretaria las recuerde a las 9:00,
@@ -63,7 +65,7 @@ from .uso import registrar_uso
 
 RAMO = "REUNIÓN"
 CARPETA_BOVEDA = "Reuniones"
-CARPETA_DOCX = Path.home() / "Library/CloudStorage/OneDrive-Personal/2 Areas/Reuniones post Claude"
+CARPETA_DOCX = Path.home() / "Library/CloudStorage/OneDrive-Personal/2 Areas/Reuniones Entrevistas post Claude"
 RUTA_INSTRUCCIONES = Path(__file__).parent / "plantilla_reunion" / "instrucciones.md"
 MARCA_INICIO, MARCA_FIN = "===REUNION_INICIO===", "===REUNION_FIN==="
 MARCA_REVISION_INICIO, MARCA_REVISION_FIN = "===REVISION_INICIO===", "===REVISION_FIN==="
@@ -504,8 +506,12 @@ def guardar(datos: dict, fecha: str, nombre: str, config: dict, transcripcion: s
     nota.write_text(nota_markdown(datos, fecha, nombre), encoding="utf-8")
     carpeta_docx = Path(config["rutas"]["output"]) / RAMO if es_ensayo(config) else CARPETA_DOCX
     # La nota de Obsidian conserva su nombre: renombrar notas rompe enlaces. El
-    # .docx se llama como el audio y el .txt (ver nombres.nombre_base).
-    docx = escribir_docx(datos, fecha, nombre, _libre(carpeta_docx / f"{nombre_base(fecha, datos['titulo'], RAMO)}.docx"))
+    # .docx se llama como el audio y el .txt (ver nombres.nombre_base), y la carpeta
+    # de la reunion igual. Si ya existe, el .docx entra con "(2)": dos reuniones con
+    # el mismo titulo el mismo dia comparten carpeta, y eso es mejor que perder una.
+    comun = nombre_base(fecha, datos["titulo"], RAMO)
+    (carpeta_docx / comun).mkdir(parents=True, exist_ok=True)
+    docx = escribir_docx(datos, fecha, nombre, _libre(carpeta_docx / comun / f"{comun}.docx"))
     anotadas = anotar_acciones(datos, fecha, es_ensayo(config))
     notificar_reunion(datos["titulo"], resumen_telegram(datos, anotadas), docx)
     if not es_ensayo(config):

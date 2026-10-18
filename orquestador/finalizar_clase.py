@@ -375,7 +375,7 @@ async def procesar_clase_reconocida(trabajo_metadata: dict, config: dict, bitaco
             bitacora.archivo_creado(ruta_hoja)
         archivados = archivar_audio(trabajo, titulo, config, bitacora)
         # La clase en un solo lugar: audio, transcripcion y hoja juntos en
-        # "<ramo>/Clases/" de OneDrive (ver archivado.publicar_en_onedrive).
+        # "<ramo>/Transcripciones/" de OneDrive (ver archivado.publicar_en_onedrive).
         en_onedrive = publicar_en_onedrive(archivados, ruta_hoja, ramo, config, bitacora) is not None
 
     if trabajo.get("numeracion") == "orden":

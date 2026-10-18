@@ -2,17 +2,20 @@
 Todo lo que el agente hace con la carpeta de cada ramo en OneDrive.
 
 Es la carpeta que el estudiante mas mira. Ahi guarda todo lo de la intranet de
-la universidad, y la abre desde el iPhone con o sin el Mac. El agente deja cada
-clase en "<ramo>/Clases/" (archivado.publicar_en_onedrive), las hojas de
-evaluacion en "<ramo>/Creada por Claude/", lo que el estudiante manda por el chat
-en "<ramo>/Bot de IA/", y lee, con lista blanca, el material que sirve para la
-hoja de cada evaluacion.
+la universidad, y la abre desde el iPhone con o sin el Mac. El agente deja en
+"<ramo>/Transcripciones/" cada clase (archivado.publicar_en_onedrive) y las hojas de
+evaluacion, lo que el estudiante manda por el chat en "<ramo>/Bot de IA/", y lee,
+con lista blanca, el material que sirve para la hoja de cada evaluacion.
+
+Hasta el 18-10-2026 las clases iban a "Clases/" y las hojas de evaluacion a "Creada
+por Claude/". El estudiante pidio una sola carpeta por ramo con todo lo que el
+agente genera: el .txt, las hojas .html y el audio comprimido.
 
 La carpeta de cada ramo la declara config.json en "carpetas_onedrive", como
 fuente unica (issue #1). Hasta el 14-10-2026 salia de FUENTES del copiador comun
 de _herramientas, que copiaba las hojas de clase a "Creada por Claude": las
-clases ahora viven en "Clases", junto a su audio y su transcripcion, y el
-copiador dejo de hacer falta aqui.
+clases ahora viven junto a su audio y su transcripcion, y el copiador dejo de
+hacer falta aqui.
 """
 import hashlib
 import logging
@@ -22,7 +25,7 @@ import shutil
 import unicodedata
 from pathlib import Path
 
-CREADA_POR_CLAUDE = "Creada por Claude"
+TRANSCRIPCIONES = "Transcripciones"
 
 # ponytail: tope por archivo para que una pauta enorme no se coma el prompt de
 # la hoja. Las pautas reales miden 5.000 a 10.000 caracteres (medido el
@@ -32,12 +35,12 @@ MAX_CARACTERES_POR_ARCHIVO = 20_000
 
 def copiar_pisando(ruta: Path, ramo: str, config: dict) -> Path | None:
     """
-    Copia una hoja por evaluacion a "<ramo>/Creada por Claude/", reemplazando la
+    Copia una hoja por evaluacion a "<ramo>/Transcripciones/", reemplazando la
     version anterior. Es la unica excepcion a la regla de no pisar, autorizada
     por el estudiante el 29-09-2026 para estas hojas: se rehacen despues de cada
     clase, y sin pisar se acumularian "(2)", "(3)" que tendria que borrar a
-    mano. Quien llama solo la usa con una hoja que paso la validacion. Van
-    separadas de las clases, que viven en "<ramo>/Clases/".
+    mano. Quien llama solo la usa con una hoja que paso la validacion. Viven
+    junto a las clases: su nombre empieza por la evaluacion, no por la fecha.
 
     Se escribe aparte y se reemplaza de una vez, para que OneDrive nunca
     sincronice una hoja a medio copiar. Nunca lanza: devuelve None si no pudo.
@@ -46,7 +49,7 @@ def copiar_pisando(ruta: Path, ramo: str, config: dict) -> Path | None:
         carpeta = carpeta_del_ramo(ramo, config)
         if carpeta is None or not carpeta.is_dir():
             return None
-        destino = carpeta / CREADA_POR_CLAUDE / ruta.name
+        destino = carpeta / TRANSCRIPCIONES / ruta.name
         destino.parent.mkdir(exist_ok=True)
         temporal = destino.with_name(f".{destino.name}.tmp")
         shutil.copyfile(ruta, temporal)
@@ -113,7 +116,9 @@ def elegir_archivos(carpeta: Path, evaluacion: str, tipo: str,
     # Primero lo que esta mas arriba: de dos copias iguales queda la de la
     # carpeta del ramo, no la de una subcarpeta de respaldo.
     for ruta in sorted(carpeta.rglob("*"), key=lambda r: (len(r.parts), str(r))):
-        if ruta.suffix.lower() != ".pdf" or "Creada por Claude" in ruta.parts:
+        # Los PDF del propio agente (hojas exportadas) viven en Transcripciones:
+        # leerlos como material del profesor seria citarse a si mismo.
+        if ruta.suffix.lower() != ".pdf" or TRANSCRIPCIONES in ruta.parts:
             continue
         palabras = _palabras(ruta.stem)
         if ruta == declarado:

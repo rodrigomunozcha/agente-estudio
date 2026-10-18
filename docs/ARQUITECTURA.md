@@ -93,8 +93,9 @@ El camino de una clase:
 4. `finalizar_clase` encadena el resto: `skill_runner` (la skill escribe las notas en el
    vault de Obsidian), `revisor` en sesión aparte, la corrección, los anuncios y pedidos del
    profesor hacia `evaluaciones.json`, `hoja_html`, el `archivado` del audio y su
-   publicación en `<carpeta del ramo>/Clases/` de OneDrive (audio comprimido movido,
-   transcripción y hoja copiadas, con el mismo nombre), y `hoja_evaluacion`. La carpeta de
+   publicación en `<carpeta del ramo>/Transcripciones/` de OneDrive (audio comprimido movido,
+   transcripción y hoja copiadas, con el mismo nombre), y `hoja_evaluacion`, cuya hoja va a
+   esa misma carpeta (`onedrive.TRANSCRIPCIONES`). La carpeta de
    cada ramo la declara `carpetas_onedrive` en `config.json`. `Procesados/` y `Output/`
    quedan como sala de trabajo. Una clase con `<slug>_skill.json` ya está escrita.
    Antes de la skill, `material_ramo` deja en `<slug>_material.txt` el programa declarado
@@ -107,8 +108,8 @@ El camino de una clase:
 5. `notificaciones` avisa en el Mac y repite en Telegram solo los avisos finales.
 
 Una grabación con ramo `REUNIÓN` se desvía a `reuniones.py`. Deja una nota en `Reuniones/`
-del vault y un `.docx` en OneDrive, con el audio comprimido y la transcripción al lado y con
-el mismo nombre, manda las acciones a los pendientes y las promesas con
+del vault y un `.docx` en su propia carpeta de OneDrive (`reuniones.CARPETA_DOCX`), con el
+audio comprimido y la transcripción al lado y con el mismo nombre, manda las acciones a los pendientes y las promesas con
 plazo de la otra parte como seguimientos (solo lo que tiene cita en la transcripción, que
 Python comprueba) y ofrece un botón
 que abre Google Calendar con el evento lleno.

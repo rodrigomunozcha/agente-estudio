@@ -2184,7 +2184,7 @@ def probar_clase_completa_termina_en_notas_y_hoja() -> None:
 
 def probar_clase_en_un_solo_lugar() -> None:
     """
-    Una clase termina en la carpeta de su ramo en OneDrive, en Clases/, con el audio,
+    Una clase termina en la carpeta de su ramo en OneDrive, en Transcripciones/, con el audio,
     la transcripcion y la hoja juntos y con el mismo nombre. El audio se mueve y lo
     demas se copia: Procesados y Output quedan como sala de trabajo. Nunca pisa, no
     toca la carpeta real en un ensayo, y detener la corrida lo deshace. La carpeta
@@ -2215,8 +2215,8 @@ def probar_clase_en_un_solo_lugar() -> None:
     try:
         archivados, hoja = clase()
         clases = ar.publicar_en_onedrive(archivados, hoja, ramo, config)
-        check("audio, transcripción y hoja quedan juntos en Clases, con el mismo nombre",
-              clases == carpeta_ramo / "Clases"
+        check("audio, transcripción y hoja quedan juntos en Transcripciones, con el mismo nombre",
+              clases == carpeta_ramo / "Transcripciones"
               and sorted(p.name for p in clases.iterdir()) == [f"{nombre}.html", f"{nombre}.m4a", f"{nombre}.txt"],
               str(list(clases.iterdir())) if clases else "None")
         check("el audio se mueve y no queda dos veces, la transcripción y la hoja se copian",
@@ -2443,7 +2443,7 @@ def probar_material_de_onedrive() -> None:
         "Instrucciones-Caso.pdf": "Entregar un informe de diez paginas",
         "Control-2-RamoX-Pauta.pdf": "Pregunta de control",
         "Nombre Apellido _ LinkedIn.pdf": "perfil de una persona",
-        "Creada por Claude/Solemne 2 - RamoX.pdf": "hoja del propio agente",
+        "Transcripciones/Solemne 2 - RamoX.pdf": "hoja del propio agente",
         "Libros/Quimica - Autor.pdf": "un libro entero",
         "Solemne-2-borrador.docx": "",
         "Trabajo Nombre Apellido - Caso.docx": "",
@@ -2533,7 +2533,7 @@ def probar_hoja_por_evaluacion() -> None:
               "carpetas_ramo": {ramo: str(carpeta)},
               "carpetas_onedrive": {ramo: str(semestre / "Ramo de prueba")}}
     salida = base / "Output" / ramo / "Evaluaciones" / "Solemne 2 - Ramo de Prueba.html"
-    en_onedrive = semestre / "Ramo de prueba" / "Creada por Claude" / salida.name
+    en_onedrive = semestre / "Ramo de prueba" / "Transcripciones" / salida.name
 
     pedidos, avisos, hojas = [], [], []
     respuesta = {"cuerpo": "<section>primera version</section>", "motivo": None}
@@ -2571,8 +2571,9 @@ def probar_hoja_por_evaluacion() -> None:
         check("queda igual en OneDrive y lo avisa",
               en_onedrive.is_file() and en_onedrive.read_text(encoding="utf-8") == documento
               and hojas[-1][2:] == (2, salida, True), str(hojas))
-        check("en la carpeta de cosas creadas con Claude, separada de las clases",
-              not (semestre / "Ramo de prueba" / "Clases").exists())
+        check("junto a las clases, en Transcripciones, sin carpetas viejas",
+              not (semestre / "Ramo de prueba" / "Clases").exists()
+              and not (semestre / "Ramo de prueba" / "Creada por Claude").exists())
 
         respuesta["cuerpo"] = "<section>segunda version</section>"
         asyncio.run(he.actualizar_tras_clase(ramo, dia(-3), config))
@@ -3374,8 +3375,9 @@ def probar_reuniones() -> None:
               all(s in md for s in ("## Acciones", "## La entrevista", "Sugerencia para mejorarla",
                                     "## Para investigar: Empresa Ejemplo")))
         doc = Document(docx)
-        check("y un .docx en la carpeta de OneDrive",
-              docx.parent == base / "OneDrive" and doc.paragraphs[0].text == analisis["titulo"])
+        check("y un .docx en su propia carpeta de OneDrive, con su mismo nombre",
+              docx.parent.parent == base / "OneDrive" and docx.parent.name == docx.stem
+              and doc.paragraphs[0].text == analisis["titulo"], str(docx))
         pendientes = ev.cargar()["pendientes"]
         acciones = [p for p in pendientes if p.get("tipo") != "seguimiento"]
         check("solo la accion con fecha futura y cita en la grabacion queda para la secretaria",

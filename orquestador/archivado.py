@@ -18,7 +18,7 @@ El original que se reemplaza NUNCA se borra: comprimir_en_sitio lo mueve a
 borre el mismo cuando quiera. Este pipeline no borra archivos por su cuenta.
 
 Etapa 6 (parte 2), publicar_en_onedrive: cada clase vive en un solo lugar, la
-carpeta de su ramo en OneDrive, en "Clases/", con el audio comprimido, la
+carpeta de su ramo en OneDrive, en "Transcripciones/", con el audio comprimido, la
 transcripcion y la hoja juntos y con el mismo nombre (issue #1). El audio se
 mueve, para que el archivo pesado no exista dos veces. La transcripcion y la hoja
 se copian: Procesados/ y Output/ quedan como sala de trabajo del agente, porque
@@ -30,9 +30,7 @@ from pathlib import Path
 from .comprimir_notas_voz import comprimir_en_sitio
 from .ensayo import es_ensayo
 from .nombres import nombre_base
-from .onedrive import carpeta_del_ramo
-
-CLASES = "Clases"
+from .onedrive import TRANSCRIPCIONES, carpeta_del_ramo
 
 
 def archivar_audio(trabajo: dict, titulo: str, config: dict, bitacora=None) -> list[Path]:
@@ -91,7 +89,7 @@ def _libre(ruta: Path) -> Path:
 def publicar_en_onedrive(archivados: list[Path], ruta_hoja: Path, ramo: str, config: dict,
                          bitacora=None) -> Path | None:
     """
-    Deja la clase en "<carpeta del ramo>/Clases/": mueve el audio y copia la
+    Deja la clase en "<carpeta del ramo>/Transcripciones/": mueve el audio y copia la
     transcripcion y la hoja, todos con su nombre compartido. Devuelve la carpeta, o
     None si no se pudo (el ramo no declara carpeta en config.json, OneDrive no esta,
     o es un ensayo, que no puede dejar clases de mentira en la carpeta real). En ese
@@ -105,7 +103,7 @@ def publicar_en_onedrive(archivados: list[Path], ruta_hoja: Path, ramo: str, con
     carpeta = carpeta_del_ramo(ramo, config)
     if carpeta is None or not carpeta.is_dir():
         return None
-    return reunir_en(carpeta / CLASES, archivados, [ruta_hoja], bitacora)
+    return reunir_en(carpeta / TRANSCRIPCIONES, archivados, [ruta_hoja], bitacora)
 
 
 def reunir_en(carpeta: Path, archivados: list[Path], copias: list[Path], bitacora=None) -> Path | None:
