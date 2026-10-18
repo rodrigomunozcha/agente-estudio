@@ -79,6 +79,10 @@ sección entrena justo eso:
   que usa. Si la pregunta pide clasificar (tipos de necesidad, de estrategia, de variable),
   la respuesta pone cada dato del caso en su categoría y dice por qué va ahí y no en la
   vecina. Si pide contrastar, contrasta punto por punto.
+- La respuesta modelo copia las cifras del caso tal como aparecen, y deja dicho cuando algo
+  es una inferencia y no un dato del caso ("el caso no lo dice, pero se sigue de..."). Una
+  solemne corregida que se revisó el 18-10-2026 traía justo ese comentario del profesor: cuidar la
+  precisión de los datos del caso y no atribuir relaciones que el caso no señala.
 - Bajo cada respuesta, una línea "Lo que suma puntaje": lo que tiene que aparecer para
   llevarse el puntaje completo.
 - Todo en positivo, también el título de la sección. Nada de tarjetas de errores ni de

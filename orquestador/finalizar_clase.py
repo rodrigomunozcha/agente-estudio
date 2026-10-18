@@ -44,7 +44,7 @@ from .hoja_html import (
 )
 from .ensayo import es_ensayo
 from . import estado_vivo, evaluaciones, hoja_evaluacion, material_ramo, reuniones
-from .nombres import renumerar_clases_ramo
+from .nombres import carpeta_por_fecha, renumerar_clases_ramo
 from .notificaciones import notificar_aviso, notificar_error, notificar_exito, notificar_progreso
 from .revisor import hallazgos_graves, leer_calidad, revisar
 from .skill_runner import aplicar_skill, corregir_con_revision, normalizar_resultado
@@ -375,8 +375,9 @@ async def procesar_clase_reconocida(trabajo_metadata: dict, config: dict, bitaco
             bitacora.archivo_creado(ruta_hoja)
         archivados = archivar_audio(trabajo, titulo, config, bitacora)
         # La clase en un solo lugar: audio, transcripcion y hoja juntos en
-        # "<ramo>/Transcripciones/" de OneDrive (ver archivado.publicar_en_onedrive).
-        en_onedrive = publicar_en_onedrive(archivados, ruta_hoja, ramo, config, bitacora) is not None
+        # "<ramo>/Transcripciones/<fecha> - <tema>/" de OneDrive (ver archivado.publicar_en_onedrive).
+        clase = carpeta_por_fecha(trabajo["fecha"], titulo)
+        en_onedrive = publicar_en_onedrive(archivados, ruta_hoja, ramo, clase, config, bitacora) is not None
 
     if trabajo.get("numeracion") == "orden":
         # Solo para ramos manuales (fuera del horario con calendario propio):

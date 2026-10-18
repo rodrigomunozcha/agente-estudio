@@ -53,7 +53,9 @@ def sanitizar_nombre_archivo(texto: str) -> str:
 
 
 def fecha_corta(iso: str) -> str:
-    """ "2026-10-08" -> "08.10.26". Con el cero adelante, Finder ordena por fecha."""
+    """ "2026-10-08" -> "08.10.26". Ordena por fecha solo dentro de un mismo mes: entre
+    meses, 01.10.26 queda antes que 06.08.26, porque manda el dia. Por eso la carpeta de
+    cada clase lleva la fecha al reves (carpeta_por_fecha)."""
     try:
         return date.fromisoformat(iso).strftime("%d.%m.%y")
     except (TypeError, ValueError):
@@ -72,6 +74,15 @@ def nombre_base(fecha: str, titulo: str, ramo: str) -> str:
     2026-10-08 - Titulo": el numero se sigue viendo en la cabecera de la hoja."""
     partes = (fecha_corta(fecha), sanitizar_nombre_archivo(titulo), ramo_legible(ramo).strip())
     return sanitizar_nombre_archivo(" - ".join(p for p in partes if p))
+
+
+def carpeta_por_fecha(fecha: str, titulo: str) -> str:
+    """La carpeta de una clase o una reunion en OneDrive: "2026-10-15 - Titulo". Con el
+    año primero, el Finder las deja en orden de fecha con solo ordenar por nombre. Lo
+    pidio el estudiante el 18-10-2026: con todos los archivos sueltos en una carpeta y
+    la fecha como 15.10.26, no encontraba la hoja de una clase. Los archivos de adentro
+    conservan nombre_base, que dice fecha, tema y ramo: cada uno se entiende solo."""
+    return sanitizar_nombre_archivo(f"{fecha} - {titulo}")
 
 
 def calcular_numero_clase_por_orden(procesados_dir: Path, ramo: str, fecha: date) -> int:

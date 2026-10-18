@@ -58,7 +58,7 @@ from .archivado import archivar_audio, reunir_en
 from .config import cargar_config, dir_pendientes
 from .ensayo import es_ensayo
 from .hoja_html import HERRAMIENTAS_PROHIBIDAS
-from .nombres import nombre_base, sanitizar_nombre_archivo
+from .nombres import carpeta_por_fecha, nombre_base, sanitizar_nombre_archivo
 from .notificaciones import notificar_aviso, notificar_evento, notificar_memoria, notificar_reunion
 from .skill_runner import CLI_PATH, PROJECT_ROOT, consultar, describir_error_sdk
 from .uso import registrar_uso
@@ -506,12 +506,14 @@ def guardar(datos: dict, fecha: str, nombre: str, config: dict, transcripcion: s
     nota.write_text(nota_markdown(datos, fecha, nombre), encoding="utf-8")
     carpeta_docx = Path(config["rutas"]["output"]) / RAMO if es_ensayo(config) else CARPETA_DOCX
     # La nota de Obsidian conserva su nombre: renombrar notas rompe enlaces. El
-    # .docx se llama como el audio y el .txt (ver nombres.nombre_base), y la carpeta
-    # de la reunion igual. Si ya existe, el .docx entra con "(2)": dos reuniones con
-    # el mismo titulo el mismo dia comparten carpeta, y eso es mejor que perder una.
-    comun = nombre_base(fecha, datos["titulo"], RAMO)
-    (carpeta_docx / comun).mkdir(parents=True, exist_ok=True)
-    docx = escribir_docx(datos, fecha, nombre, _libre(carpeta_docx / comun / f"{comun}.docx"))
+    # .docx se llama como el audio y el .txt (ver nombres.nombre_base). La carpeta de
+    # la reunion lleva la fecha al reves, para que queden en orden (carpeta_por_fecha).
+    # Si ya existe, el .docx entra con "(2)": dos reuniones con el mismo titulo el
+    # mismo dia comparten carpeta, y eso es mejor que perder una.
+    carpeta = carpeta_docx / carpeta_por_fecha(fecha, datos["titulo"])
+    carpeta.mkdir(parents=True, exist_ok=True)
+    docx = escribir_docx(datos, fecha, nombre,
+                         _libre(carpeta / f"{nombre_base(fecha, datos['titulo'], RAMO)}.docx"))
     anotadas = anotar_acciones(datos, fecha, es_ensayo(config))
     notificar_reunion(datos["titulo"], resumen_telegram(datos, anotadas), docx)
     if not es_ensayo(config):

@@ -2184,7 +2184,7 @@ def probar_clase_completa_termina_en_notas_y_hoja() -> None:
 
 def probar_clase_en_un_solo_lugar() -> None:
     """
-    Una clase termina en la carpeta de su ramo en OneDrive, en Transcripciones/, con el audio,
+    Una clase termina en la carpeta de su ramo en OneDrive, en Transcripciones/<fecha> - <tema>/, con el audio,
     la transcripcion y la hoja juntos y con el mismo nombre. El audio se mueve y lo
     demas se copia: Procesados y Output quedan como sala de trabajo. Nunca pisa, no
     toca la carpeta real en un ensayo, y detener la corrida lo deshace. La carpeta
@@ -2214,31 +2214,34 @@ def probar_clase_en_un_solo_lugar() -> None:
 
     try:
         archivados, hoja = clase()
-        clases = ar.publicar_en_onedrive(archivados, hoja, ramo, config)
-        check("audio, transcripción y hoja quedan juntos en Transcripciones, con el mismo nombre",
-              clases == carpeta_ramo / "Transcripciones"
+        carpeta_clase = nombres.carpeta_por_fecha("2026-09-09", "Una clase de prueba")
+        check("la carpeta de la clase empieza por la fecha al revés, para que el Finder las ordene",
+              carpeta_clase == "2026-09-09 - Una clase de prueba", carpeta_clase)
+        clases = ar.publicar_en_onedrive(archivados, hoja, ramo, carpeta_clase, config)
+        check("audio, transcripción y hoja quedan juntos en la carpeta de su clase, con el mismo nombre",
+              clases == carpeta_ramo / "Transcripciones" / carpeta_clase
               and sorted(p.name for p in clases.iterdir()) == [f"{nombre}.html", f"{nombre}.m4a", f"{nombre}.txt"],
               str(list(clases.iterdir())) if clases else "None")
         check("el audio se mueve y no queda dos veces, la transcripción y la hoja se copian",
               not archivados[0].exists() and archivados[1].is_file() and hoja.is_file())
 
         archivados, hoja = clase()
-        ar.publicar_en_onedrive(archivados, hoja, ramo, config)
+        ar.publicar_en_onedrive(archivados, hoja, ramo, carpeta_clase, config)
         check("una clase con el mismo nombre no pisa la que ya estaba",
               (clases / f"{nombre} (2).m4a").is_file()
               and (clases / f"{nombre}.m4a").read_bytes() == b"audio comprimido")
 
         archivados, hoja = clase()
         check("un ramo sin carpeta declarada no publica ni mueve nada",
-              ar.publicar_en_onedrive(archivados, hoja, "OTRO RAMO", config) is None and archivados[0].is_file())
+              ar.publicar_en_onedrive(archivados, hoja, "OTRO RAMO", carpeta_clase, config) is None and archivados[0].is_file())
         check("en un ensayo no toca OneDrive",
-              ar.publicar_en_onedrive(archivados, hoja, ramo, dict(config, **{ensayo.CLAVE: True})) is None
+              ar.publicar_en_onedrive(archivados, hoja, ramo, carpeta_clase, dict(config, **{ensayo.CLAVE: True})) is None
               and archivados[0].is_file())
 
         nuevo = dict(config, carpetas_onedrive={ramo: str(base / "OneDrive" / "Ramo nuevo")})
         (base / "OneDrive" / "Ramo nuevo").mkdir()
         b = Bitacora(base / "bitacora.json")
-        publicada = ar.publicar_en_onedrive(archivados, hoja, ramo, nuevo, b)
+        publicada = ar.publicar_en_onedrive(archivados, hoja, ramo, carpeta_clase, nuevo, b)
         b.deshacer()
         check("detener la corrida devuelve el audio y saca las copias",
               publicada is not None and archivados[0].is_file() and not publicada.exists(), str(publicada))
@@ -2533,7 +2536,7 @@ def probar_hoja_por_evaluacion() -> None:
               "carpetas_ramo": {ramo: str(carpeta)},
               "carpetas_onedrive": {ramo: str(semestre / "Ramo de prueba")}}
     salida = base / "Output" / ramo / "Evaluaciones" / "Solemne 2 - Ramo de Prueba.html"
-    en_onedrive = semestre / "Ramo de prueba" / "Transcripciones" / salida.name
+    en_onedrive = semestre / "Ramo de prueba" / "Transcripciones" / "Evaluaciones y repasos" / salida.name
 
     pedidos, avisos, hojas = [], [], []
     respuesta = {"cuerpo": "<section>primera version</section><section><h2><span>Práctica</span><span class=\"peso\">el caso</span></h2>caso</section>", "motivo": None}
@@ -3387,7 +3390,7 @@ def probar_reuniones() -> None:
                                     "## Para investigar: Empresa Ejemplo")))
         doc = Document(docx)
         check("y un .docx en su propia carpeta de OneDrive, con su mismo nombre",
-              docx.parent.parent == base / "OneDrive" and docx.parent.name == docx.stem
+              docx.parent.parent == base / "OneDrive" and docx.parent.name.startswith("2026-")
               and doc.paragraphs[0].text == analisis["titulo"], str(docx))
         pendientes = ev.cargar()["pendientes"]
         acciones = [p for p in pendientes if p.get("tipo") != "seguimiento"]

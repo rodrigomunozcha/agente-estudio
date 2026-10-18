@@ -26,6 +26,9 @@ import unicodedata
 from pathlib import Path
 
 TRANSCRIPCIONES = "Transcripciones"
+# Dentro de Transcripciones, lo que no es una clase: las hojas de evaluacion y los
+# repasos. Las clases van cada una en su carpeta con fecha (nombres.carpeta_por_fecha).
+EVALUACIONES_Y_REPASOS = "Evaluaciones y repasos"
 
 # ponytail: tope por archivo para que una pauta enorme no se coma el prompt de
 # la hoja. Las pautas reales miden 5.000 a 10.000 caracteres (medido el
@@ -35,12 +38,11 @@ MAX_CARACTERES_POR_ARCHIVO = 20_000
 
 def copiar_pisando(ruta: Path, ramo: str, config: dict) -> Path | None:
     """
-    Copia una hoja por evaluacion a "<ramo>/Transcripciones/", reemplazando la
+    Copia una hoja por evaluacion a "<ramo>/Transcripciones/Evaluaciones y repasos/", reemplazando la
     version anterior. Es la unica excepcion a la regla de no pisar, autorizada
     por el estudiante el 29-09-2026 para estas hojas: se rehacen despues de cada
     clase, y sin pisar se acumularian "(2)", "(3)" que tendria que borrar a
-    mano. Quien llama solo la usa con una hoja que paso la validacion. Viven
-    junto a las clases: su nombre empieza por la evaluacion, no por la fecha.
+    mano. Quien llama solo la usa con una hoja que paso la validacion.
 
     Se escribe aparte y se reemplaza de una vez, para que OneDrive nunca
     sincronice una hoja a medio copiar. Nunca lanza: devuelve None si no pudo.
@@ -49,8 +51,8 @@ def copiar_pisando(ruta: Path, ramo: str, config: dict) -> Path | None:
         carpeta = carpeta_del_ramo(ramo, config)
         if carpeta is None or not carpeta.is_dir():
             return None
-        destino = carpeta / TRANSCRIPCIONES / ruta.name
-        destino.parent.mkdir(exist_ok=True)
+        destino = carpeta / TRANSCRIPCIONES / EVALUACIONES_Y_REPASOS / ruta.name
+        destino.parent.mkdir(parents=True, exist_ok=True)
         temporal = destino.with_name(f".{destino.name}.tmp")
         shutil.copyfile(ruta, temporal)
         os.replace(temporal, destino)
