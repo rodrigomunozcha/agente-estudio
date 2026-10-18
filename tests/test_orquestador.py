@@ -2536,7 +2536,7 @@ def probar_hoja_por_evaluacion() -> None:
     en_onedrive = semestre / "Ramo de prueba" / "Transcripciones" / salida.name
 
     pedidos, avisos, hojas = [], [], []
-    respuesta = {"cuerpo": "<section>primera version</section>", "motivo": None}
+    respuesta = {"cuerpo": "<section>primera version</section><section><h2><span>Práctica</span><span class=\"peso\">el caso</span></h2>caso</section>", "motivo": None}
 
     async def pedir_falso(system_prompt, prompt, etapa, slug, minimo):
         pedidos.append((system_prompt, prompt))
@@ -2575,7 +2575,7 @@ def probar_hoja_por_evaluacion() -> None:
               not (semestre / "Ramo de prueba" / "Clases").exists()
               and not (semestre / "Ramo de prueba" / "Creada por Claude").exists())
 
-        respuesta["cuerpo"] = "<section>segunda version</section>"
+        respuesta["cuerpo"] = "<section>segunda version</section><section><h2><span>Práctica</span><span class=\"peso\">el caso</span></h2>caso</section>"
         asyncio.run(he.actualizar_tras_clase(ramo, dia(-3), config))
         check("la siguiente clase la reemplaza en el mismo archivo, sin copias (2)",
               "segunda version" in salida.read_text(encoding="utf-8")
@@ -2591,12 +2591,23 @@ def probar_hoja_por_evaluacion() -> None:
               and avisos[-1][0] == "No se actualizó la hoja de la Solemne 2", str(avisos))
         respuesta["motivo"] = None
 
+        # La hoja del 18-10-2026: paro a la mitad y nombraba la seccion que faltaba.
+        respuesta["cuerpo"] = ("<section><h2>Materia</h2>tercera version a medias. Lo que falta: "
+                               "<strong>Práctica con un caso</strong>. ¿Quieres que te devuelva la "
+                               "hoja completa?</section>")
+        check("si sale cortada, sin la sección de práctica, no devuelve hoja",
+              asyncio.run(he.actualizar_tras_clase(ramo, dia(-3), config)) is None)
+        check("y la version anterior queda intacta, con aviso de que salió cortada",
+              "segunda version" in en_onedrive.read_text(encoding="utf-8")
+              and "cortada" in avisos[-1][1], str(avisos[-1]))
+        respuesta["cuerpo"] = "<section>segunda version</section><section><h2><span>Práctica</span><span class=\"peso\">el caso</span></h2>caso</section>"
+
         antes = len(pedidos)
         check("una evaluacion que ya paso queda congelada",
               asyncio.run(he.actualizar_tras_clase(ramo, dia(-25), config)) is None
               and len(pedidos) == antes)
 
-        respuesta["cuerpo"] = "<section>version de ensayo</section>"
+        respuesta["cuerpo"] = "<section>version de ensayo</section><section><h2><span>Práctica</span><span class=\"peso\">el caso</span></h2>caso</section>"
         asyncio.run(he.actualizar_tras_clase(ramo, dia(-3), dict(config, **{ensayo.CLAVE: True})))
         check("en ensayo no toca OneDrive",
               "segunda version" in en_onedrive.read_text(encoding="utf-8") and hojas[-1][4] is False, str(hojas[-1]))

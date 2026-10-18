@@ -162,6 +162,20 @@ def tarjeta_evaluacion(ev: dict, clases: list[tuple[str, str, str]], perdidas: l
     return "".join(partes) + "</div>"
 
 
+# La practica va al final de la hoja, asi que su titulo dice que la hoja llego entera.
+# El 18-10-2026 el modelo paro a la mitad de la materia y dejo dentro de la hoja una
+# pregunta para el estudiante ("¿Quieres que te devuelva la hoja completa?"). Pasaba el
+# minimo de palabras y reemplazo a la version buena. Se busca el titulo de seccion y no
+# la palabra suelta: ese mensaje tambien nombraba la seccion que faltaba. El titulo
+# llega como <h2><span>Práctica</span><span class="peso">...</span></h2>: la primera
+# version del chequeo no admitia el <span> y rechazo dos hojas buenas ese mismo dia.
+_TITULO_PRACTICA = re.compile(r"<h2[^>]*>(?:\s*<[^>]+>)*\s*Pr[aá]ctica\b", re.IGNORECASE)
+
+
+def llego_entera(cuerpo: str) -> bool:
+    return bool(_TITULO_PRACTICA.search(cuerpo))
+
+
 def _construir_prompt(ramo: str, ev: dict, tipo: str, clases: list[tuple[str, str, str]],
                       material: list[dict]) -> str:
     partes = [
@@ -248,6 +262,11 @@ async def generar(ramo: str, nombre: str, config: dict, datos: dict | None = Non
     if cuerpo is None:
         notificar_aviso(f"No se actualizó la hoja de la {nombre_largo}",
                         f"{ramo_legible(ramo)}: {motivo}. La versión anterior sigue igual.")
+        return None
+    if tipo != "trabajo" and not llego_entera(cuerpo):
+        notificar_aviso(f"No se actualizó la hoja de la {nombre_largo}",
+                        f"{ramo_legible(ramo)}: salió cortada, sin la sección de práctica. "
+                        "La versión anterior sigue igual.")
         return None
 
     fecha = html.escape(_fecha_legible(ev["fecha"]) if ev.get("fecha") else "fecha sin confirmar")

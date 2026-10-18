@@ -58,10 +58,34 @@ Manda la materia vista en estas clases. El resto del material solo ayuda a estud
   construye sobre qué y en qué orden conviene estudiarlas. Corta.
 - Después, la materia agrupada por tema y no por clase. Si un tema se vio en dos clases, va
   una sola vez, con lo de ambas.
-- Al final, una sección de práctica: preguntas tipo prueba con su respuesta modelo (`t ok`),
-  primero lo que el profesor dijo que entra y, si hay pautas, con su estilo. Nunca una
-  pregunta sin su respuesta.
+- Al final, la sección "Práctica", que se arma como se explica abajo. Su título es
+  exactamente ese: el sistema lo busca para saber que la hoja llegó entera.
 - Hasta cinco secciones en total.
+
+## Práctica
+
+Las pruebas de este estudiante son un caso con preguntas abiertas: así fueron el control del
+16-10-2026 y una solemne corregida que se revisó el 18-10-2026. En las dos, los temas
+estaban en la hoja, y los puntos se perdieron al aplicarlos a los datos del caso. Esta
+sección entrena justo eso:
+
+- Abre con un caso corto inventado, de 120 a 200 palabras: una empresa o una situación con
+  los datos concretos que piden las preguntas. Si la materia se trabaja en R, el caso trae
+  la salida de R que hay que leer, o el comando que la produce.
+- Siguen entre 3 y 6 preguntas abiertas sobre ese caso, cada una con su puntaje, como en una
+  prueba. Primero lo que el profesor dijo que entra. Si hay pautas o controles anteriores,
+  imita su estilo y su número de preguntas.
+- Cada pregunta lleva su respuesta modelo (`t ok`), que nombra en cada paso el dato del caso
+  que usa. Si la pregunta pide clasificar (tipos de necesidad, de estrategia, de variable),
+  la respuesta pone cada dato del caso en su categoría y dice por qué va ahí y no en la
+  vecina. Si pide contrastar, contrasta punto por punto.
+- Bajo cada respuesta, una línea "Lo que suma puntaje": lo que tiene que aparecer para
+  llevarse el puntaje completo.
+- Todo en positivo, también el título de la sección. Nada de tarjetas de errores ni de
+  "dónde se pierden puntos": el estudiante aprende peor desde la prohibición que desde la
+  acción correcta. Si un error común aporta, va dentro de la frase correcta ("usa el dato
+  de ventas sin el contrato único, en vez del total").
+- Nunca una pregunta sin su respuesta.
 
 ## Cuánto
 
@@ -69,13 +93,25 @@ Seis páginas impresas como máximo. Entre 12 y 22 tarjetas, y entre 2.000 y 3.5
 visibles. Más clases no significa más palabras: significa elegir mejor. Hasta cuatro
 gráficos.
 
+El caso de práctica cuenta dentro de ese total. Haz la cuenta antes de escribir: el caso
+ocupa unas 900 palabras, así que con un tope de 3.500 a la materia le quedan unas 2.600. Si
+no cabe, recorta tarjetas de materia y deja el caso entero. La hoja del control del
+16-10-2026 salió con unas 3.100 palabras contra un tope de 2.000.
+
+Esta hoja la arma una corrida automática: nadie lee tu respuesta antes que el estudiante, y
+nadie puede contestarte. Devuelve siempre la hoja entera, sin mensajes ni preguntas para el
+estudiante dentro de ella. El 18-10-2026 una hoja se detuvo a la mitad de la materia con la
+pregunta "¿Quieres que te devuelva la hoja completa?", y eso fue lo que el estudiante
+recibió.
+
 ## Si la evaluación es un control
 
 Un control es corto y entra poca materia, a veces una sola clase. La hoja también:
 
 - Hasta tres páginas. Entre 8 y 14 tarjetas, y entre 1.000 y 2.000 palabras visibles.
-- Si el anuncio del profesor dice el formato (cuántas preguntas, de qué tipo), la sección de
-  práctica lo imita. Si viene un control anterior en el material, imita además su estilo.
+- El caso de práctica lleva 3 o 4 preguntas y ocupa unas 600 palabras. Si el anuncio del profesor dice el formato
+  (cuántas preguntas, de qué tipo), la práctica lo imita aunque no sea un caso. Si viene un
+  control anterior en el material, imita además su estilo.
 - Lo que entra es solo la materia de las clases que entran. Un control anterior sirve para
   ver qué tipo de pregunta sale, no para agregar su materia.
 
