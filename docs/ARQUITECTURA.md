@@ -86,7 +86,10 @@ El camino de una clase:
    sigue sin respuesta. La ventana del Mac (`pantalla_confirmacion`) ya no se llama.
 3. `transcripcion` importa `backend.transcriber` de Transcriptotem, que vive en OneDrive (ruta
    en `config.json`), y deja el texto en `orquestador/transcripciones_pendientes/`. Ese
-   intermedio permite reintentar sin volver a transcribir.
+   intermedio permite reintentar sin volver a transcribir. Al lado deja
+   `<slug>_whisper.json`, la salida cruda de Whisper: cada segmento con sus tiempos y su
+   confianza, y cada palabra con su probabilidad. Es para medir la transcripción sin volver
+   a pasar el audio por Whisper. Ninguna etapa lo lee todavía.
 4. `finalizar_clase` encadena el resto: `skill_runner` (la skill escribe las notas en el
    vault de Obsidian), `revisor` en sesión aparte, la corrección, los anuncios y pedidos del
    profesor hacia `evaluaciones.json`, `hoja_html`, el `archivado` del audio y su

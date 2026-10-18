@@ -69,6 +69,9 @@ def transcribir_trabajo(trabajo: dict, config: dict) -> str:
     contexto = trabajo.get("contexto") or ""
     archivos = trabajo["archivos"]
     partes = []
+    # Viaja dentro del trabajo y no como valor de retorno, para que quien llama
+    # (procesar_pendientes, procesar_manual) no cambie: _guardar_pendiente lo saca.
+    trabajo["segmentos_whisper"] = crudos = []
     for i, ruta_audio in enumerate(archivos, start=1):
         detalle = f"Parte {i} de {len(archivos)}" if len(archivos) > 1 else trabajo["fecha"]
         # La transcripcion es la unica etapa cuyo tiempo si se puede estimar
@@ -78,13 +81,18 @@ def transcribir_trabajo(trabajo: dict, config: dict) -> str:
         notificar_progreso(estado_vivo.PASO_TRANSCRIBIR, detalle, eta,
                            sub=(i, len(archivos)) if len(archivos) > 1 else None)
         comenzo = time.monotonic()
+        # Cada parte es otro archivo, con sus tiempos desde cero.
+        de_esta_parte = []
         # Los audios largos se cortan solos antes de transcribir: uno de casi
         # dos horas devolvia cero texto sin dar error (ver _transcribir_archivo).
         # La verificacion de que salio texto ocurre tramo por tramo ahi adentro.
         if es_de_dos_pistas(ruta_audio):
-            texto = transcribir_dos_pistas(transcribe, ruta_audio, perfil, contexto, duracion, detalle)
+            texto = transcribir_dos_pistas(transcribe, ruta_audio, perfil, contexto, duracion, detalle,
+                                           de_esta_parte)
         else:
-            texto = _transcribir_archivo(transcribe, ruta_audio, perfil, contexto, duracion, detalle)
+            texto = _transcribir_archivo(transcribe, ruta_audio, perfil, contexto, duracion, detalle,
+                                         de_esta_parte)
+        crudos += [{**s, "parte": i} for s in de_esta_parte] if len(archivos) > 1 else de_esta_parte
         # Con la medicion real, la estimacion de la proxima clase deja de
         # depender de una constante escrita a mano (ver uso.py).
         # ponytail: una grabacion de dos pistas no se mide. Transcribe hasta dos
@@ -221,15 +229,19 @@ def _partir_audio(ruta_audio: str, carpeta: Path) -> list[Path]:
 
 
 def _transcribir_archivo(transcribe, ruta_audio: str, perfil: str, contexto: str,
-                         duracion: float | None, etiqueta: str) -> str:
-    """Transcribe un archivo, cortandolo antes si es largo."""
+                         duracion: float | None, etiqueta: str, crudos: list | None = None) -> str:
+    """Transcribe un archivo, cortandolo antes si es largo. En `crudos` deja los
+    segmentos de Whisper con su confianza (ver _capturando_segmentos)."""
     if not duracion or duracion <= UMBRAL_PARTIR_SEGUNDOS:
-        return _transcribir_verificando(transcribe, ruta_audio, perfil, contexto, duracion)
+        with _capturando_segmentos() as segmentos:
+            texto = _transcribir_verificando(transcribe, ruta_audio, perfil, contexto, duracion)
+        _anotar_crudos(crudos, segmentos, 0.0)
+        return texto
 
     temporal = Path(tempfile.mkdtemp(prefix=PREFIJO_TROZOS))
     try:
         trozos = _partir_audio(ruta_audio, temporal)
-        piezas = []
+        piezas, desde = [], 0.0
         for i, trozo in enumerate(trozos, start=1):
             notificar_progreso(
                 estado_vivo.PASO_TRANSCRIBIR,
@@ -237,8 +249,11 @@ def _transcribir_archivo(transcribe, ruta_audio: str, perfil: str, contexto: str
                 (duracion / estado_vivo.velocidad_transcripcion()) * (1 - (i - 1) / len(trozos)),
                 sub=(i, len(trozos)),
             )
-            texto = _transcribir_verificando(transcribe, str(trozo), perfil, contexto,
-                                             estado_vivo.duracion_audio_segundos(trozo))
+            largo_trozo = estado_vivo.duracion_audio_segundos(trozo)
+            with _capturando_segmentos() as segmentos:
+                texto = _transcribir_verificando(transcribe, str(trozo), perfil, contexto, largo_trozo)
+            _anotar_crudos(crudos, segmentos, desde)
+            desde += largo_trozo or 0
             piezas.append(texto.strip())
         return "\n".join(piezas)
     finally:
@@ -332,24 +347,62 @@ def _tiene_voz(ruta_audio: str) -> bool:
     return bool(m) and float(m.group(1)) > DB_MINIMO_VOZ
 
 
+# La confianza con que Whisper escribio cada segmento. Hasta el 18-10-2026 se
+# botaba en cada clase, y es justo lo que dice donde dudo: sin ella, medir la
+# transcripcion obligaba a volver a pasar el audio por Whisper.
+#
+# La del segmento sola no alcanza. Medido en vivo el 18-10-2026 con 40 s de una
+# clase: los segmentos de una misma ventana de 30 s salen con el mismo
+# avg_logprob (-0.305 en tres frases seguidas), asi que no dice que frase fue la
+# dudosa. Las palabras si traen cada una su probabilidad (33 valores distintos en
+# 42 palabras), y van como [inicio, fin, palabra, probabilidad] para que pesen
+# poco: estimado desde esos 40 s, cerca de medio MB por clase de dos horas,
+# el doble que sin ellas.
+CAMPOS_CONFIANZA = ("avg_logprob", "no_speech_prob", "compression_ratio")
+
+
 @contextmanager
 def _capturando_segmentos():
     """Transcriptotem devuelve solo el texto. Para saber en que segundo dijo cada
-    frase se intercepta _texto_por_frases, que recibe el resultado completo de
-    Whisper con sus segmentos, sin tocar Transcriptotem."""
-    import backend.transcriber as bt
-    capturados: list[tuple[float, float, str]] = []
+    frase, y con que confianza, se intercepta _texto_por_frases, que recibe el
+    resultado completo de Whisper con sus segmentos, antes del filtro de
+    alucinaciones, sin tocar Transcriptotem.
+
+    Guardar los segmentos es un extra: si algo falla al capturarlos, la lista
+    queda vacia y la transcripcion sigue igual. Perder la clase por esto no vale."""
+    capturados: list[dict] = []
+    try:
+        import backend.transcriber as bt
+    except ImportError:
+        yield capturados
+        return
     original = bt._texto_por_frases
 
     def capturar(resultado):
-        capturados[:] = [(float(x.get("start") or 0), float(x.get("end") or 0), (x.get("text") or "").strip())
-                         for x in resultado.get("segments") or []]
+        try:
+            capturados[:] = [{"start": round(float(x.get("start") or 0), 2), "end": round(float(x.get("end") or 0), 2),
+                              "text": (x.get("text") or "").strip(),
+                              **{k: x.get(k) for k in CAMPOS_CONFIANZA},
+                              "words": [[round(float(p["start"]), 2), round(float(p["end"]), 2), p["word"].strip(),
+                                         round(float(p["probability"]), 3)] for p in x.get("words") or []]}
+                             for x in resultado.get("segments") or []]
+        except Exception:
+            capturados.clear()
         return original(resultado)
     bt._texto_por_frases = capturar
     try:
         yield capturados
     finally:
         bt._texto_por_frases = original
+
+
+def _anotar_crudos(crudos: list | None, segmentos: list[dict], desde: float, **extra) -> None:
+    """Agrega los segmentos de un trozo con sus tiempos corridos al inicio del
+    trozo, para que cada uno diga en que segundo del audio completo se dijo."""
+    if crudos is not None:
+        crudos += [{**s, "start": round(s["start"] + desde, 2), "end": round(s["end"] + desde, 2),
+                    "words": [[round(a + desde, 2), round(b + desde, 2), w, p] for a, b, w, p in s.get("words", [])], **extra}
+                   for s in segmentos]
 
 
 def emparejar(segmentos: list[tuple[float, float, str]], texto: str,
@@ -374,7 +427,8 @@ def emparejar(segmentos: list[tuple[float, float, str]], texto: str,
 
 
 def _transcribir_con_tiempos(transcribe, ruta_audio: str, perfil: str, contexto: str,
-                             duracion: float | None, verificar: bool) -> list[tuple[float, float, str]]:
+                             duracion: float | None, verificar: bool,
+                             crudos: list | None = None, canal: str = "") -> list[tuple[float, float, str]]:
     """(inicio, fin, frase) de un canal, cortado en trozos si es largo. Solo las
     frases que sobrevivieron al filtro de alucinaciones de Transcriptotem. Con
     `verificar`, un trozo vacio se reintenta una vez, como en una clase, pero si
@@ -395,7 +449,8 @@ def _transcribir_con_tiempos(transcribe, ruta_audio: str, perfil: str, contexto:
                         texto = ""
                 else:
                     texto, _, _ = transcribe(str(trozo), language_profile=perfil, context_text=contexto)
-            frases += emparejar(segmentos, texto, desde)
+            frases += emparejar([(s["start"], s["end"], s["text"]) for s in segmentos], texto, desde)
+            _anotar_crudos(crudos, segmentos, desde, canal=canal)
             desde += estado_vivo.duracion_audio_segundos(trozo) or 0
         return frases
     finally:
@@ -417,7 +472,7 @@ def mezclar_por_tiempo(tu: list[tuple[float, str]], otros: list[tuple[float, str
 
 
 def transcribir_dos_pistas(transcribe, ruta_audio: str, perfil: str, contexto: str,
-                           duracion: float | None, etiqueta: str) -> str:
+                           duracion: float | None, etiqueta: str, crudos: list | None = None) -> str:
     """
     Separa los canales y transcribe cada uno. Lo que se verifica es el texto
     final de los dos juntos, no la llamada sola: en una entrevista donde hablas
@@ -440,13 +495,15 @@ def transcribir_dos_pistas(transcribe, ruta_audio: str, perfil: str, contexto: s
                            check=True, capture_output=True)
         notificar_progreso(estado_vivo.PASO_TRANSCRIBIR, f"{etiqueta}, lo que sonó en la llamada")
         otros = frases_con_voz(
-            _transcribir_con_tiempos(transcribe, str(canales["otros"]), perfil, contexto, duracion, True),
+            _transcribir_con_tiempos(transcribe, str(canales["otros"]), perfil, contexto, duracion, True,
+                                     crudos, "Otros"),
             _tramos_con_voz(str(canales["otros"])))
         tu = []
         if _tiene_voz(str(canales["tu"])):
             notificar_progreso(estado_vivo.PASO_TRANSCRIBIR, f"{etiqueta}, tu micrófono")
             tu = frases_con_voz(
-                _transcribir_con_tiempos(transcribe, str(canales["tu"]), perfil, contexto, duracion, False),
+                _transcribir_con_tiempos(transcribe, str(canales["tu"]), perfil, contexto, duracion, False,
+                                         crudos, "Tú"),
                 _tramos_con_voz(str(canales["tu"])))
         texto = mezclar_por_tiempo(tu, otros) if tu else "\n".join(f for _, f in otros)
         _verificar_parte(texto.removeprefix(MARCAS), ruta_audio, duracion)
@@ -490,6 +547,15 @@ def _guardar_pendiente(trabajo: dict, texto: str, bitacora=None) -> None:
     slug = slug_pendiente(trabajo["clave"])
     ruta_txt = dir_pendientes() / f"{slug}.txt"
     ruta_txt.write_text(texto, encoding="utf-8")
+    # La salida cruda de Whisper, aparte: en el .json del trabajo serian miles
+    # de lineas que nadie de las etapas siguientes lee. Se queda en este Mac,
+    # como el resto de transcripciones_pendientes/ (ver .gitignore).
+    crudos = trabajo.pop("segmentos_whisper", None)
+    if crudos:
+        ruta_crudos = dir_pendientes() / f"{slug}_whisper.json"
+        ruta_crudos.write_text(json.dumps(crudos, ensure_ascii=False), encoding="utf-8")
+        if bitacora is not None:
+            bitacora.archivo_creado(ruta_crudos)
     metadata = dict(trabajo)
     metadata["archivos_originales"] = metadata.pop("archivos")
     metadata["archivo_texto"] = str(ruta_txt)

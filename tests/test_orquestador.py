@@ -4227,6 +4227,74 @@ def probar_tramo_vacio() -> None:
         check("si sale vacio dos veces, se detiene con el aviso", "también al reintentarla" in str(e))
 
 
+def probar_salida_cruda_de_whisper() -> None:
+    """Los segmentos de Whisper con su confianza se guardan aparte en cada
+    transcripcion (18-10-2026), y si no se pueden capturar la clase sigue igual.
+    Con un Transcriptotem simulado: no hace falta Whisper ni OneDrive."""
+    print("\n== salida cruda de Whisper ==")
+    import json
+    import types
+    from orquestador import transcripcion as tr
+
+    frase = "Hoy vemos los supuestos de MCO y cómo validarlos en R. " * 6
+    falso = types.ModuleType("backend.transcriber")
+    falso._texto_por_frases = lambda r: "\n".join(s["text"].strip() for s in r["segments"])
+
+    def transcribe(ruta, language_profile, context_text):
+        # Como el de verdad: llama a _texto_por_frases por el modulo, no por una copia.
+        r = {"segments": [{"start": 0.5, "end": 9.0, "text": " " + frase, "avg_logprob": -0.21,
+                           "no_speech_prob": 0.01, "compression_ratio": 1.3,
+                           "words": [{"word": " Hoy", "start": 0.5, "end": 0.9, "probability": 0.87654}]}]}
+        return sys.modules["backend.transcriber"]._texto_por_frases(r), "es", 1
+
+    paquete = types.ModuleType("backend")
+    paquete.transcriber = falso
+    antes = {k: sys.modules.get(k) for k in ("backend", "backend.transcriber")}
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        sys.modules.update({"backend": paquete, "backend.transcriber": falso})
+        crudos = []
+        texto = tr._transcribir_archivo(transcribe, "clase.m4a", "es-chile", "", 60, "x", crudos)
+        check("el texto sale igual que antes", texto == frase.strip())
+        check("cada segmento trae su tiempo y su confianza",
+              crudos and crudos[0]["start"] == 0.5 and crudos[0]["avg_logprob"] == -0.21
+              and crudos[0]["no_speech_prob"] == 0.01, crudos)
+        check("y cada palabra, compacta, con su probabilidad",
+              crudos and crudos[0]["words"] == [[0.5, 0.9, "Hoy", 0.877]], crudos and crudos[0]["words"])
+        check("la interceptacion se deshace al terminar", falso._texto_por_frases.__name__ == "<lambda>")
+
+        trozo = []
+        tr._anotar_crudos(trozo, [{"start": 1.0, "end": 2.0, "text": "a", "words": [[1.0, 1.5, "a", 0.9]]}],
+                          1200.0, canal="Tú")
+        check("en un trozo, los tiempos se corren al inicio del trozo, también los de cada palabra",
+              trozo == [{"start": 1201.0, "end": 1202.0, "text": "a", "words": [[1201.0, 1201.5, "a", 0.9]],
+                         "canal": "Tú"}], trozo)
+
+        usar_dir_pendientes(tmp)
+        trabajo = {"clave": "2026-10-15|clase.m4a", "archivos": ["clase.m4a"], "segmentos_whisper": crudos}
+        tr._guardar_pendiente(trabajo, texto)
+        slug = nombres.slug_pendiente(trabajo["clave"])
+        guardado = json.loads((tmp / f"{slug}_whisper.json").read_text(encoding="utf-8"))
+        meta = json.loads((tmp / f"{slug}.json").read_text(encoding="utf-8"))
+        check("se guardan en <slug>_whisper.json", guardado == crudos)
+        check("y no inflan el .json del trabajo", "segmentos_whisper" not in meta)
+
+        # Sin Transcriptotem que interceptar, la transcripcion no se pierde.
+        sys.modules["backend.transcriber"] = None
+        crudos = []
+        texto = tr._transcribir_archivo(lambda ruta, language_profile, context_text: (frase, "es", 1),
+                                        "clase.m4a", "es-chile", "", 60, "x", crudos)
+        check("si no se pueden capturar, la clase sigue sin segmentos", texto == frase and crudos == [])
+    finally:
+        usar_dir_pendientes(None)
+        for k, v in antes.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def probar_evaluaciones_unico_escritor() -> None:
     """evaluaciones.py es el unico que escribe evaluaciones.json, con candado
     (decision del 08-10-2026). Sin Telegram ni modelo: solo el archivo."""
