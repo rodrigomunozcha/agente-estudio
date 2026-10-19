@@ -1,11 +1,12 @@
 # La corrida automatizada tiene reglas propias
 
-Estas reglas aplican al pipeline. Las de idioma, costo cero, privacidad y entorno están
-en el `CLAUDE.md` de la raíz y también valen aquí.
+Estas reglas aplican al pipeline. Las de idioma, privacidad y entorno están en el
+`CLAUDE.md` de la raíz y también valen aquí.
 
-`skill_runner.py`, `revisor.py` y `hoja_html.py` invocan al modelo de forma desatendida,
-sin nadie que apruebe permisos, sobre texto transcrito de audio. Ese texto no es una
-fuente confiable y termina dentro del prompt.
+Todo módulo que crea un `ClaudeAgentOptions` (`skill_runner.py`, `revisor.py`,
+`hoja_html.py`, `reuniones.py`, `bot.py`, `verificar.py`) invoca al modelo de forma
+desatendida, sin nadie que apruebe permisos, sobre texto transcrito de audio. Ese texto
+no es una fuente confiable y termina dentro del prompt.
 
 Por eso, si tocas esa configuración:
 
@@ -15,11 +16,9 @@ Por eso, si tocas esa configuración:
   Bash sin tenerlo en `allowed_tools`.
 - **El gate de rutas (`construir_gate_de_rutas`) depende de que Bash siga bloqueado.** Si
   el modelo puede ejecutar comandos, escribe donde quiera sin pasar por el hook.
-- **`setting_sources` va siempre explícito, nunca por defecto.** Si no se pone, el SDK
-  rellena `["user", "project"]` por su cuenta. El valor cambia según lo que la sesión
-  necesite: `["project"]` en `skill_runner.py`, porque ahí se carga la skill del
-  proyecto, y `[]` en `revisor.py` y `hoja_html.py`, que no necesitan
-  la skill y arrancan más livianos sin ella.
+- **`setting_sources` va siempre explícito.** Si no se pone, el SDK rellena
+  `["user", "project"]` por su cuenta. Lleva `["project"]` solo donde se carga la skill
+  del proyecto (`skill_runner.py`), y `[]` en las demás, que arrancan más livianas.
 - **`setting_sources` no aísla la corrida de la cuenta.** Medido con
   `get_context_usage()` del propio SDK: el `MEMORY.md` de memoria automática del usuario
   (1.021 tokens) entra igual, con `["project"]` y también con `[]`. No hay opción para
@@ -32,20 +31,16 @@ Por eso, si tocas esa configuración:
   arquitectura en `docs/ARQUITECTURA.md`. El 03-10-2026 el `/init` duplicó la raíz y hubo
   que sacarlos de nuevo.
 - **Cada invocación del SDK cuesta ~16.000 tokens fijos** de system prompt antes de leer
-  nada, más releer la transcripción. Por eso el pipeline mide cada llamada, no porque
-  haya una sola. Una clase con hallazgos usa cuatro:
+  nada, más releer la transcripción. Por eso el pipeline mide cada llamada (en
+  `logs/uso.jsonl`, con su etapa). Una clase con hallazgos usa cuatro:
   1. La que escribe las notas (`aplicar_skill`).
   2. El revisor, que es sesión aparte a propósito (ver abajo).
   3. La corrección, que **retoma la sesión de la primera con `resume`** justamente para
      no volver a pagar la lectura de la transcripción.
-  4. La hoja de repaso (`hoja_html.py`), que reemplazó al `.docx` el 11-09-2026. Es sesión
-     aparte y **sin ninguna herramienta**: recibe las notas dentro del prompt y devuelve
-     el HTML, que Python sanea con lista blanca antes de guardarlo. Se agregó porque el
-     estudiante no leía los `.docx` de 20 a 25 páginas, y condensar exige criterio, no una
-     conversión. Su costo queda en `logs/uso.jsonl` con la etapa `hoja`. Primera
-     medición (Sistemas, 01-09-2026): un turno, 3 minutos y 0,55 dólares equivalentes,
-     menos que la revisión. Desde el 14-09-2026 es lo único que el pipeline genera
-     además de las notas: el `.docx` y las flashcards de Anki salieron del todo.
+  4. La hoja de repaso (`hoja_html.py`). Es sesión aparte y **sin ninguna herramienta**:
+     recibe las notas dentro del prompt y devuelve el HTML, que Python sanea con lista
+     blanca antes de guardarlo. Existe porque el estudiante no leía los `.docx` de 20 a
+     25 páginas, y condensar exige criterio, no una conversión.
 
   Antes de agregar una quinta, mide qué ahorra. Hay una que solo corre cuando falla
   algo: si la línea RESULTADO_ORQUESTADOR viene con el JSON roto, se retoma la sesión de
@@ -53,12 +48,9 @@ Por eso, si tocas esa configuración:
   clase costaba unos 12 turnos. Las reuniones no pasan por estas cuatro: tienen su
   análisis y su revisor aparte (`reuniones.py`).
 - **`max_turns` es un seguro contra corridas descontroladas**, no un objetivo. Cada
-  etapa tiene el suyo según el trabajo que hace, y los cuatro son constantes con
-  nombre: `MAX_TURNS` (30, escribir la clase) y `MAX_TURNS_CORRECCION` (30, corregir)
-  en `skill_runner.py`, 25 en `revisor.py` y 3 en `hoja_html.py`
-  (no usa herramientas, así que responde en un turno). Si una etapa se pasa
-  de su tope, algo se salió de lo esperado y cortar es lo correcto. Subir el número no
-  es el arreglo.
+  llamada tiene el suyo en una constante `MAX_TURNS...` de su módulo, según el trabajo que
+  hace. Si una etapa se pasa de su tope, algo se salió de lo esperado y cortar es lo
+  correcto. Subir el número no es el arreglo.
 
 ## Honestidad del contenido generado
 
@@ -68,16 +60,15 @@ correcta no es escribirlo mejor, es quitarlo o marcarlo (reconstrucción a verif
 dudoso por audio, hueco).
 
 `revisor.py` existe para eso y corre como sesión aparte, sin haber escrito nada. No es
-una autocrítica dentro de la misma sesión, y esa separación es deliberada. No la
-colapses en una sola llamada, aunque ahorre tokens: es el único punto del pipeline que
-mira las notas sin haberlas escrito.
+una autocrítica dentro de la misma sesión, y esa separación es deliberada. Mantenla en
+dos llamadas aunque una sola ahorre tokens: es el único punto del pipeline que mira las
+notas sin haberlas escrito.
 
-La tarjeta "Lo que el profesor pidió" de la hoja de repaso la arma Python, no el modelo.
-Sale de la nota de aprendizaje, y si no hay de dónde sacarla dice que no se pudo
-comprobar. No se la devuelvas al modelo ni la armes desde el campo `llamados` cuando viene
-en null: el `.docx` hacía eso y afirmaba "el profesor no anunció fechas ni evaluación"
-aunque la nota trajera los anuncios. Pasó en cuatro clases, y en Sistemas del 01-09-2026
-negaba el anuncio de la prueba del martes siguiente y de los capítulos que entraban.
+La tarjeta "Lo que el profesor pidió" de la hoja de repaso la arma Python, a partir de la
+nota de aprendizaje, y si no hay de dónde sacarla dice que no se pudo comprobar. Se armaba
+con el modelo desde el campo `llamados`, y cuando venía en null el `.docx` afirmaba "el
+profesor no anunció fechas ni evaluación" aunque la nota trajera los anuncios. Pasó en
+cuatro clases, y la del 01-09-2026 negaba el anuncio de la prueba del martes siguiente.
 
 ## Al hacer cambios
 
@@ -90,26 +81,25 @@ negaba el anuncio de la prueba del martes siguiente y de los capítulos que entr
   No es pytest. Es un runner propio: el bloque `if __name__ == "__main__"` de
   `tests/test_orquestador.py` ejecuta todas las funciones cuyo nombre empieza con
   `probar_`, en el orden en que están escritas. **Una prueba nueva tiene que llamarse
-  `probar_...`**, o no se ejecuta. Hasta el 15-09-2026 era una lista escrita a mano, y
-  una prueba que no se anotaba ahí no se ejecutaba nunca, sin que nadie se enterara.
+  `probar_...`**, o no se ejecuta.
 - Si cambias qué genera la skill, revisa que `finalizar_clase.py` siga armando la hoja
   cuando falta un campo. El principio es que perder una sección es mucho mejor que perder
   la clase.
 - Si agregas una etapa, decide qué pasa si falla. El patrón del repo es degradar, no
   abortar: la revisión es opcional por diseño, y la hoja se arma aunque falte una
-  sección, avisando cuál. La excepción es cuando falta
-  el insumo esencial: sin transcripción no hay nada que degradar, y ahí sí se corta.
+  sección, avisando cuál. La excepción es cuando falta el insumo esencial: sin
+  transcripción no hay nada que degradar, y ahí sí se corta.
 - **Degradar nunca puede significar afirmar en falso.** Una sección que falta es
   aceptable. Una sección que dice "no hay nada" sin haberlo comprobado, no: el estudiante
   no puede distinguirla de la verdad. Si una etapa no pudo averiguar algo, tiene que
   decirlo distinto de "averigüé que no hay", y **no cachear ese resultado**, o el próximo
   intento se saltará la pregunta para siempre. Ya falló en `extraer_llamados`, del
-  antiguo `regenerar.py` (retirado el 14-09-2026, sigue en el historial de git): un
-  corte de red quedaba guardado como "el profesor no pidió nada".
+  antiguo `regenerar.py` (sigue en el historial de git): un corte de red quedaba guardado
+  como "el profesor no pidió nada".
 - **Un error tardío del SDK no descarta el trabajo hecho.** Si el modelo alcanzó a emitir
   su línea de resultado, la corrida terminó y esa respuesta vale, aunque después llegue
-  un 429. Nunca hagas `raise` ni `return` dentro del bucle `async for`: anota el error,
-  sal del bucle, e intenta parsear. Las cuatro llamadas siguen ese patrón.
+  un 429. Dentro del bucle `async for`, anota el error, sal con `break` e intenta parsear:
+  un `raise` o un `return` ahí pierde la respuesta.
 - **Itera con `skill_runner.consultar`, no con `query` del SDK.** El SDK actual, después
   de entregar un resultado con error, levanta una excepción que lo repite sin decir nada
   ("Claude Code returned an error result: success"). Esa excepción se saltaba el patrón
