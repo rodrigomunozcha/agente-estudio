@@ -1379,6 +1379,9 @@ def probar_tu_y_otros_en_la_grabadora() -> None:
 
     tmp = Path(tempfile.mkdtemp())
     original = tr._transcribir_con_tiempos
+    # Sin esto, cada corrida de las pruebas escribia "Transcribiendo el audio - x" en el
+    # estado real de la barra de menu y en Estado.txt (visto el 18-10-2026).
+    progreso, tr.notificar_progreso = tr.notificar_progreso, lambda *a, **k: None
     try:
         estereo = tmp / "Reunión Online 16.10.26 - prueba.m4a"
         sp.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=300:duration=6",
@@ -1417,7 +1420,7 @@ def probar_tu_y_otros_en_la_grabadora() -> None:
               tr.frases_con_voz([(1.0, 3.0, "Hola"), (10.0, 11.0, "Gracias.")], [(0.5, 4.0)])
               == [(1.0, "Hola")])
     finally:
-        tr._transcribir_con_tiempos = original
+        tr._transcribir_con_tiempos, tr.notificar_progreso = original, progreso
         shutil.rmtree(tmp, ignore_errors=True)
 
 
