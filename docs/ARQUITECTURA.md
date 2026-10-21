@@ -65,6 +65,7 @@ con las rutas de este Mac.
 | `local.agente-estudio.bot` | `bot` | Siempre, esperando mensajes de Telegram |
 | `local.agente-estudio.secretaria` | `secretaria` | Todos los días a las 9:00. Si no hay nada que decir, no escribe |
 | `local.agente-estudio.chequeo` | `chequeo` | De lunes a viernes a las 18:00, antes de clases. Solo escribe si algo impediría procesar la clase |
+| `local.agente-estudio.remoto` | `claude remote-control` | Siempre, si el estudiante lo instaló con `launchd/instalar_remoto.sh`: arreglar una falla desde la app de Claude en el iPhone |
 | `local.agente-estudio.grabadora` | `grabadora/Grabadora.app` | Siempre, como botón en la barra de menú para grabar reuniones on-line |
 
 La grabadora (`grabadora/Grabadora.swift`) graba el audio del sistema con un tap de Core
