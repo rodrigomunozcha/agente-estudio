@@ -147,7 +147,7 @@ def _listar_ensayables() -> list[tuple[str, Path]]:
     return [
         (p.stem, p)
         for p in sorted(PENDIENTES_DIR_POR_DEFECTO.glob("*.json"))
-        if not p.stem.endswith(("_skill", "_revision"))
+        if p.with_suffix(".txt").exists()  # la ficha, no un archivo secundario
     ]
 
 

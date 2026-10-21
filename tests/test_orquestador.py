@@ -3433,6 +3433,7 @@ def probar_reuniones() -> None:
         pend.mkdir()
         audio = base / "Entrevista grupal.m4a"
         audio.write_bytes(b"audio de mentira")  # si no existe, el flujo la da por ya archivada
+        (pend / "s9.txt").write_text("transcripcion", encoding="utf-8")  # toda ficha real trae su texto
         (pend / "s9.json").write_text(_json.dumps({"slug": "s9", "fecha": "2026-09-29", "ramo": re_.RAMO,
                                                    "reconocido": True, "archivos_originales": [str(audio)],
                                                    "archivos": [str(audio)]}), encoding="utf-8")
@@ -4467,6 +4468,26 @@ def probar_ingesta_del_wiki_al_terminar_una_clase() -> None:
         fc.lanzar_ingesta_wiki({"ingesta_wiki": True})
         args, kw = popen.call_args
         check("lo lanza aparte y con --ahora", args[0][-1] == "--ahora" and kw.get("start_new_session") is True)
+
+
+def probar_pendientes_ignora_archivos_secundarios() -> None:
+    """Solo la ficha de una clase cuenta como pendiente. El 20-10-2026 un _whisper.json,
+    que es una lista, se leyo como ficha y la clase del dia nunca se proceso."""
+    print("\n== pendientes: solo las fichas de clase ==")
+    from orquestador import finalizar_clase as fc
+
+    tmp = Path(tempfile.mkdtemp(prefix="pendientes_"))
+    usar_dir_pendientes(tmp)
+    try:
+        (tmp / "2026-10-20_abc.txt").write_text("texto")
+        (tmp / "2026-10-20_abc.json").write_text('{"reconocido": true}')
+        for extra in ("_whisper", "_skill", "_revision", "_reunion"):
+            (tmp / f"2026-10-19_def{extra}.json").write_text("[]")
+        nombres = [x.name for x in fc._listar_metadatas_pendientes()]
+        check("lista solo la ficha que tiene su .txt", nombres == ["2026-10-20_abc.json"], str(nombres))
+    finally:
+        usar_dir_pendientes(None)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

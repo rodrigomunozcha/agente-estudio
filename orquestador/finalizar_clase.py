@@ -123,8 +123,11 @@ def _leer_nota(ruta: str | None, vault_dir: str) -> str:
 def _listar_metadatas_pendientes() -> list[Path]:
     if not dir_pendientes().exists():
         return []
+    # La ficha de una clase es el .json que tiene su .txt al lado. Los demas .json son
+    # archivos secundarios (_skill, _revision, _reunion, _whisper). Antes se excluian por
+    # nombre, y el _whisper.json, que es una lista, tumbo la clase del 20-10-2026.
     return sorted(
-        p for p in dir_pendientes().glob("*.json") if not p.stem.endswith("_skill")
+        p for p in dir_pendientes().glob("*.json") if p.with_suffix(".txt").exists()
     )
 
 
