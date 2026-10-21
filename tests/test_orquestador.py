@@ -28,6 +28,9 @@ from orquestador import telegram as _telegram
 # aviso que el pipeline copia al iPhone se omite. Las pruebas del cliente ponen
 # uno falso por su cuenta.
 _telegram.token = lambda: None
+# Ni la bandeja de avisos atrasados: el 21-10-2026 una prueba que simula un corte dejo un
+# "hola" en la bandeja real cada vez que corrian las pruebas, y el bot se lo mando 7 veces.
+_telegram.BANDEJA = Path(tempfile.mkdtemp(prefix="bandeja_pruebas_")) / "pendientes.jsonl"
 from orquestador.config import PENDIENTES_DIR_POR_DEFECTO, dir_pendientes, usar_dir_pendientes
 
 fallos: list[str] = []
