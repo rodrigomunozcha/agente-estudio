@@ -4543,34 +4543,6 @@ def probar_vigia_de_atascos() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def probar_chequeo_antes_de_clases() -> None:
-    """A las 18:00: si algo impediria procesar la clase, avisa por Telegram. Si no, calla."""
-    print("\n== chequeo antes de clases ==")
-    from orquestador import chequeo, verificar
-
-    nombres = ("_modulos_del_pipeline", "_cli_de_claude", "_sesion_de_claude",
-               "_configuracion", "_transcriptor_legible", "_espacio_en_disco")
-    originales = {n: getattr(verificar, n) for n in nombres}
-    original_avisar = chequeo.telegram.avisar
-    avisos = []
-    chequeo.telegram.avisar = lambda texto, **k: avisos.append(texto)
-    try:
-        for n in nombres:
-            setattr(verificar, n, lambda n=n: verificar._anotar(verificar.OK, n))
-        verificar._resultados.clear()
-        chequeo.main()
-        check("con todo bien no escribe", avisos == [])
-        verificar._sesion_de_claude = lambda: verificar._anotar(verificar.FALLA, "la sesión de Claude venció")
-        verificar._resultados.clear()
-        chequeo.main()
-        check("si algo falla, avisa que es", len(avisos) == 1 and "la sesión de Claude venció" in avisos[0], str(avisos))
-    finally:
-        for n, f in originales.items():
-            setattr(verificar, n, f)
-        chequeo.telegram.avisar = original_avisar
-        verificar._resultados.clear()
-
-
 if __name__ == "__main__":
     # Todas las funciones probar_*, en el orden en que estan escritas. Antes era
     # una lista a mano, y una prueba que no se anotaba ahi no se ejecutaba nunca,

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Instala tres LaunchAgents de macOS (el chequeo de las 18:00 esta mas abajo):
+# Instala tres LaunchAgents de macOS:
 #   - el bot de Telegram (orquestador.bot), que queda corriendo siempre y se
 #     reinicia solo si se cae. Mientras espera mensajes no usa CPU: queda
 #     dormido en una conexion abierta con Telegram.
@@ -65,14 +65,6 @@ escribir_plist local.agente-estudio.secretaria orquestador.secretaria "	<key>Sta
 		<integer>0</integer>
 	</dict>" secretaria.log
 
-# El chequeo antes de clases: de lunes a viernes a las 18:00 (ver orquestador/chequeo.py).
-DIAS=""
-for d in 1 2 3 4 5; do DIAS="$DIAS
-		<dict><key>Weekday</key><integer>$d</integer><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>"; done
-escribir_plist local.agente-estudio.chequeo orquestador.chequeo "	<key>StartCalendarInterval</key>
-	<array>$DIAS
-	</array>" chequeo.log
 
 echo "Listo. El bot quedo corriendo y la secretaria escribe a las 9:00 si hay algo."
-echo "El chequeo antes de clases corre de lunes a viernes a las 18:00 y solo escribe si algo falla."
 echo "Registros: $RAIZ/orquestador/logs/bot.log y secretaria.log"
