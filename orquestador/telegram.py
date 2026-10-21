@@ -111,13 +111,16 @@ def boton_enlace(texto: str, url: str) -> dict:
     return {"inline_keyboard": [[{"text": texto, "url": url}]]}
 
 
-def enviar(texto: str, chat_id: int | None = None, teclado: dict | None = None) -> dict:
-    """Envia un mensaje (partido si es largo). Devuelve el ultimo enviado."""
+def enviar(texto: str, chat_id: int | None = None, teclado: dict | None = None, silencioso: bool = False) -> dict:
+    """Envia un mensaje (partido si es largo). Devuelve el ultimo enviado. Silencioso
+    llega sin sonido ni vibracion."""
     chat_id = chat_id or chat_autorizado()
     trozos = _trozos(texto or "(vacío)")
     ultimo = None
     for i, trozo in enumerate(trozos):
         extra = {"reply_markup": teclado} if teclado and i == len(trozos) - 1 else {}
+        if silencioso:
+            extra["disable_notification"] = True
         ultimo = llamar("sendMessage", chat_id=chat_id, text=trozo, **extra)
     return ultimo
 
@@ -152,7 +155,7 @@ def responder_boton(callback_query_id: str, texto: str = "") -> None:
         pass
 
 
-def enviar_documento(ruta: Path, leyenda: str = "", chat_id: int | None = None) -> dict:
+def enviar_documento(ruta: Path, leyenda: str = "", chat_id: int | None = None, silencioso: bool = False) -> dict:
     """Sube un archivo como documento (multipart/form-data, que es lo que pide
     Telegram para subir archivos)."""
     t = token()
@@ -160,7 +163,10 @@ def enviar_documento(ruta: Path, leyenda: str = "", chat_id: int | None = None) 
         raise RuntimeError("falta el token del bot en el Llavero de macOS")
     limite = f"----agente{uuid.uuid4().hex}"
     partes = []
-    for nombre, valor in (("chat_id", str(chat_id or chat_autorizado())), ("caption", leyenda[:MAX_LEYENDA])):
+    campos = [("chat_id", str(chat_id or chat_autorizado())), ("caption", leyenda[:MAX_LEYENDA])]
+    if silencioso:
+        campos.append(("disable_notification", "true"))
+    for nombre, valor in campos:
         partes.append(f'--{limite}\r\nContent-Disposition: form-data; name="{nombre}"\r\n\r\n{valor}\r\n'.encode())
     nombre_archivo = Path(ruta).name.replace('"', "'")
     partes.append(f'--{limite}\r\nContent-Disposition: form-data; name="document"; filename="{nombre_archivo}"\r\n'
@@ -188,11 +194,11 @@ def descargar(file_id: str, destino: Path) -> Path:
     return destino
 
 
-def _mandar(texto: str, adjunto: str | None, teclado: dict | None) -> None:
+def _mandar(texto: str, adjunto: str | None, teclado: dict | None, silencioso: bool = False) -> None:
     if adjunto is not None and Path(adjunto).is_file():
-        enviar_documento(Path(adjunto), texto)
+        enviar_documento(Path(adjunto), texto, silencioso=silencioso)
     else:
-        enviar(texto, teclado=teclado)
+        enviar(texto, teclado=teclado, silencioso=silencioso)
 
 
 def avisar(texto: str, adjunto: Path | None = None, teclado: dict | None = None) -> bool:
@@ -230,7 +236,9 @@ def _vaciar(lista: list) -> bool:
     while lista:
         p = lista[0]
         try:
-            _mandar(f"⏰ Aviso atrasado (de las {p['hora']}, sin conexión)\n{p['texto']}", p["adjunto"], p["teclado"])
+            # En silencio: si la red vuelve de madrugada, los atrasados no despiertan a nadie.
+            _mandar(f"⏰ Aviso atrasado (de las {p['hora']}, sin conexión)\n{p['texto']}", p["adjunto"], p["teclado"],
+                    silencioso=True)
         except Exception as e:
             if _sin_conexion(e):
                 return False

@@ -4465,14 +4465,15 @@ def probar_bandeja_de_avisos() -> None:
     from orquestador import telegram as tg
 
     tmp = Path(tempfile.mkdtemp(prefix="bandeja_"))
-    enviados, hay_red = [], {"si": False}
+    enviados, hay_red, silenciosos = [], {"si": False}, []
 
-    def mandar(texto, adjunto, teclado):
+    def mandar(texto, adjunto, teclado, silencioso=False):
         if "ROTO" in texto:
             raise RuntimeError("Telegram rechazó sendMessage: Bad Request: message is too long")
         if not hay_red["si"]:
             raise RuntimeError("Telegram rechazó sendMessage: sin conexión ([Errno 8])")
         enviados.append(texto)
+        silenciosos.append(silencioso)
 
     originales = (tg.BANDEJA, tg._mandar, tg.token, tg.chat_autorizado)
     tg.BANDEJA, tg._mandar = tmp / "pendientes.jsonl", mandar
@@ -4487,6 +4488,7 @@ def probar_bandeja_de_avisos() -> None:
               len(enviados) == 2 and "Aviso atrasado" in enviados[0] and enviados[0].endswith("primero")
               and enviados[1].endswith("segundo"), str(enviados))
         check("y la bandeja queda vacia", tg.BANDEJA.read_text() == "")
+        check("los atrasados llegan en silencio, para no despertar de madrugada", silenciosos == [True, True])
         tg.avisar("tercero")
         check("con red, un aviso nuevo sale directo", enviados[-1] == "tercero")
         check("con red, un aviso con error que no es de red no entra a la bandeja",
