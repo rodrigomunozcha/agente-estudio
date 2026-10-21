@@ -89,6 +89,36 @@ let SEGUNDOS_PARA_RECORDAR_PAUSA: TimeInterval = 15 * 60
 
 let PYTHON = "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3"
 
+// Cada cuanto se cierra el archivo de una pista y se abre el siguiente. AAC en CAF
+// escribe su indice de paquetes recien al cerrar: un archivo abierto cuando la app se
+// cae queda ilegible. El 20-10-2026 se perdieron asi 75 minutos de la llamada.
+// En trozos, una caida pierde como mucho el trozo en curso.
+let SEGUNDOS_POR_TROZO: TimeInterval = 5 * 60
+
+// Los motores de audio que se dejan de usar no se destruyen. AVFAudio deja avisos de
+// cambios del dispositivo pendientes para cada motor, y si llegan despues de
+// destruirlo, la app se cae: paso el 20-10-2026, 4 minutos despues de cambiar a los
+// AirPods y de vuelta (EXC_BAD_ACCESS en AVAudioIOUnit::IOUnitPropertyListener). Se
+// cayo a mitad de una clase, launchd la reabrio vacia y nadie se entero.
+// shortcut: crece con cada cambio de microfono mientras la app viva (pocos por
+// reunion), si algun dia pesa, liberarlos al cerrar la app.
+var motoresRetirados: [AVAudioEngine] = []
+
+// Duracion de un audio segun ffprobe, o nil si no se puede leer.
+func duracionAudio(_ url: URL) -> Double? {
+    guard let ffmpeg = FFMPEG else { return nil }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: (ffmpeg as NSString).deletingLastPathComponent + "/ffprobe")
+    p.arguments = ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", url.path]
+    let tubo = Pipe()
+    p.standardOutput = tubo
+    p.standardError = FileHandle.nullDevice
+    guard (try? p.run()) != nil else { return nil }
+    let datos = tubo.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    return Double(String(decoding: datos, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+}
+
 func avisar(_ titulo: String, _ mensaje: String) {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -201,15 +231,120 @@ func probarCronometro() {
     print("Cronometro: OK")
 }
 
+// Dos trozos AAC con cambio de archivo en medio: los dos se leen enteros, y el
+// registro guardado en disco vuelve igual. Es lo que permite rearmar una grabacion.
+func probarTrozos() {
+    let carpeta = FileManager.default.temporaryDirectory.appendingPathComponent("grabadora-prueba-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: carpeta, withIntermediateDirectories: true)
+    let registro = RegistroPistas(carpeta: carpeta)
+    let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
+    let segundo = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: 48000)!
+    segundo.frameLength = 48000
+    let escritor = Escritor()
+    for (i, inicio) in [0.0, 1.0].enumerated() {
+        let url = carpeta.appendingPathComponent("microfono-\(i + 1).caf")
+        escritor.cambiar(a: try! AVAudioFile(forWriting: url, settings: ajustesAAC(mono),
+                                             commonFormat: .pcmFormatFloat32, interleaved: false))
+        registro.anotar(Pista(url: url, segundo: inicio, sistema: false))
+        escritor.escribir(segundo)
+    }
+    escritor.cambiar(a: nil)
+    for pista in registro.pistas {
+        let leido = try! AVAudioFile(forReading: pista.url)
+        precondition(leido.length > 40000, "el trozo \(pista.url.lastPathComponent) se lee entero")
+    }
+    let releidas = RegistroPistas.leer(carpeta)!
+    precondition(releidas.map(\.segundo) == [0, 1] && releidas.allSatisfy { !$0.sistema },
+                 "pistas.txt devuelve lo mismo que se anoto")
+    precondition(RegistroPistas.leer(carpeta.appendingPathComponent("no-existe")) == nil)
+    print("Trozos: OK")
+}
+
+// MARK: - Pistas en trozos
+
+/// El archivo donde escribe una pista, cambiable mientras graba. Lo escribe el hilo
+/// de audio y lo cambia el principal, por eso va con candado: el cambio dura lo que
+/// asignar una variable, y el hilo de audio ya hace escritura de archivo igual.
+final class Escritor {
+    private let candado = NSLock()
+    private var archivo: AVAudioFile?
+
+    func escribir(_ buffer: AVAudioPCMBuffer) {
+        candado.lock()
+        defer { candado.unlock() }
+        try? archivo?.write(from: buffer)
+    }
+
+    /// Sigue escribiendo en `nuevo` y cierra el anterior, que queda completo.
+    func cambiar(a nuevo: AVAudioFile?) {
+        candado.lock()
+        let viejo = archivo
+        archivo = nuevo
+        candado.unlock()
+        viejo?.close()
+    }
+}
+
+struct Pista {
+    let url: URL
+    let segundo: Double
+    let sistema: Bool
+}
+
+/// Cada archivo de la grabacion con el segundo en que empieza. Se guarda tambien en
+/// pistas.txt, que es lo que permite rearmar una grabacion si la app se cae.
+final class RegistroPistas {
+    let carpeta: URL
+    private(set) var pistas: [Pista] = []
+    var archivo: URL { carpeta.appendingPathComponent("pistas.txt") }
+
+    init(carpeta: URL) { self.carpeta = carpeta }
+
+    func anotarSoloEnMemoria(_ pista: Pista) { pistas.append(pista) }
+
+    func anotar(_ pista: Pista) {
+        pistas.append(pista)
+        let linea = "\(pista.sistema ? "sistema" : "microfono")\t\(pista.segundo)\t\(pista.url.lastPathComponent)\n"
+        if let manija = try? FileHandle(forWritingTo: archivo) {
+            manija.seekToEndOfFile()
+            manija.write(linea.data(using: .utf8)!)
+            try? manija.close()
+        } else {
+            try? linea.write(to: archivo, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Las pistas guardadas en una carpeta, o nil si no tiene pistas.txt.
+    static func leer(_ carpeta: URL) -> [Pista]? {
+        guard let texto = try? String(contentsOf: carpeta.appendingPathComponent("pistas.txt"), encoding: .utf8)
+        else { return nil }
+        return texto.split(separator: "\n").compactMap { linea in
+            let partes = linea.split(separator: "\t")
+            guard partes.count == 3, let segundo = Double(partes[1]) else { return nil }
+            return Pista(url: carpeta.appendingPathComponent(String(partes[2])), segundo: segundo,
+                         sistema: partes[0] == "sistema")
+        }
+    }
+}
+
 // MARK: - Audio del sistema
 
 final class AudioSistema {
     private var tap = AudioObjectID(kAudioObjectUnknown)
     private var agregado = AudioObjectID(kAudioObjectUnknown)
     private var proceso: AudioDeviceIOProcID?
-    private var archivo: AVAudioFile?
+    private let escritor = Escritor()
+    private let registro: RegistroPistas
+    private let cronometro: Cronometro
+    private var formato: AVAudioFormat?
+    private var trozos = 0
 
-    func empezar(en url: URL, cronometro: Cronometro) throws {
+    init(registro: RegistroPistas, cronometro: Cronometro) {
+        self.registro = registro
+        self.cronometro = cronometro
+    }
+
+    func empezar() throws {
         let descripcion = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         descripcion.isPrivate = true
         descripcion.muteBehavior = .unmuted
@@ -235,15 +370,26 @@ final class AudioSistema {
         try exigir(AudioObjectGetPropertyData(tap, &direccion, 0, nil, &tamano, &asbd), "leer el formato")
         guard let formato = AVAudioFormat(streamDescription: &asbd) else { throw ErrorAudio(paso: "formato") }
 
-        let archivo = try AVAudioFile(forWriting: url, settings: ajustesAAC(formato),
-                                      commonFormat: formato.commonFormat, interleaved: formato.isInterleaved)
-        self.archivo = archivo
+        self.formato = formato
+        try rotar()
+        let escritor = escritor, cronometro = cronometro
         try exigir(AudioDeviceCreateIOProcIDWithBlock(&proceso, agregado, nil) { _, entrada, _, _, _ in
             guard !cronometro.pausado,
                   let buffer = AVAudioPCMBuffer(pcmFormat: formato, bufferListNoCopy: entrada) else { return }
-            try? archivo.write(from: buffer)
+            escritor.escribir(buffer)
         }, "conectar la lectura")
         try exigir(AudioDeviceStart(agregado, proceso), "empezar")
+    }
+
+    /// Cierra el trozo en curso y sigue en uno nuevo (ver SEGUNDOS_POR_TROZO).
+    func rotar() throws {
+        guard let formato else { return }
+        trozos += 1
+        let url = registro.carpeta.appendingPathComponent("sistema-\(trozos).caf")
+        let nuevo = try AVAudioFile(forWriting: url, settings: ajustesAAC(formato),
+                                    commonFormat: formato.commonFormat, interleaved: formato.isInterleaved)
+        escritor.cambiar(a: nuevo)
+        registro.anotar(Pista(url: url, segundo: cronometro.segundo(), sistema: true))
     }
 
     func detener() {
@@ -253,9 +399,9 @@ final class AudioSistema {
         }
         if agregado != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(agregado) }
         if tap != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tap) }
-        archivo?.close()
+        escritor.cambiar(a: nil)
         proceso = nil
-        archivo = nil
+        formato = nil
         agregado = AudioObjectID(kAudioObjectUnknown)
         tap = AudioObjectID(kAudioObjectUnknown)
     }
@@ -267,12 +413,31 @@ final class Microfono {
     private let carpeta: URL
     private let cronometro: Cronometro
     private var motor: AVAudioEngine?
-    private var archivo: AVAudioFile?
-    private(set) var tramos: [(url: URL, segundo: Double)] = []
+    private let escritor = Escritor()
+    private let registro: RegistroPistas
+    private var mono: AVAudioFormat?
+    private var archivos = 0
 
-    init(carpeta: URL, cronometro: Cronometro) {
-        self.carpeta = carpeta
+    init(registro: RegistroPistas, cronometro: Cronometro) {
+        self.registro = registro
+        self.carpeta = registro.carpeta
         self.cronometro = cronometro
+    }
+
+    private func nuevoArchivo(_ mono: AVAudioFormat) throws -> (URL, AVAudioFile) {
+        let url = carpeta.appendingPathComponent("microfono-\(archivos + 1).caf")
+        let archivo = try AVAudioFile(forWriting: url, settings: ajustesAAC(mono),
+                                      commonFormat: .pcmFormatFloat32, interleaved: false)
+        archivos += 1
+        return (url, archivo)
+    }
+
+    /// Cierra el archivo en curso y sigue en otro, con el mismo motor: abrir un motor
+    /// nuevo cada 5 minutos haria cambiar de modo a los AirPods (ver INTENTOS_CAMBIO_MICROFONO).
+    func rotar() {
+        guard motor != nil, let mono, let (url, archivo) = try? nuevoArchivo(mono) else { return }
+        escritor.cambiar(a: archivo)
+        registro.anotar(Pista(url: url, segundo: cronometro.segundo(), sistema: false))
     }
 
     /// Cierra el tramo en curso y abre otro con el microfono activo ahora.
@@ -302,17 +467,15 @@ final class Microfono {
         // del 15-10-2026 en Meet. Para una voz basta un canal.
         let mono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: formato.sampleRate,
                                  channels: 1, interleaved: false)!
-        let url = carpeta.appendingPathComponent("microfono-\(tramos.count + 1).caf")
-        let archivo: AVAudioFile
+        let url: URL, archivo: AVAudioFile
         do {
-            archivo = try AVAudioFile(forWriting: url, settings: ajustesAAC(mono),
-                                      commonFormat: .pcmFormatFloat32, interleaved: false)
+            (url, archivo) = try nuevoArchivo(mono)
         } catch {
-            registrar("no se pudo crear el archivo del tramo \(tramos.count + 1) con \(formato): \(error)")
+            registrar("no se pudo crear el archivo \(archivos + 1) con \(formato): \(error)")
             return false
         }
         oyoAlgo = false
-        let cronometro = cronometro
+        let cronometro = cronometro, escritor = escritor
         entrada.installTap(onBus: 0, bufferSize: 4096, format: formato) { [weak self] buffer, _ in
             guard let datos = buffer.floatChannelData?[0],
                   let unCanal = AVAudioPCMBuffer(pcmFormat: mono, frameCapacity: buffer.frameLength) else { return }
@@ -320,7 +483,7 @@ final class Microfono {
             unCanal.floatChannelData![0].update(from: datos, count: Int(buffer.frameLength))
             // En pausa se sigue oyendo, solo no se escribe: asi el aviso de
             // "sin voz" sigue valiendo para un tramo que se abre en la pausa.
-            if !cronometro.pausado { try? archivo.write(from: unCanal) }
+            if !cronometro.pausado { escritor.escribir(unCanal) }
             if self?.oyoAlgo == false, (0..<Int(buffer.frameLength)).contains(where: { datos[$0] != 0 }) {
                 self?.oyoAlgo = true
             }
@@ -328,15 +491,17 @@ final class Microfono {
         do {
             try motor.start()
         } catch {
-            registrar("no partió el tramo \(tramos.count + 1): \(error)")
+            registrar("no partió el archivo \(archivos): \(error)")
             entrada.removeTap(onBus: 0)
+            motoresRetirados.append(motor)
             return false
         }
         self.motor = motor
-        self.archivo = archivo
+        self.mono = mono
+        escritor.cambiar(a: archivo)
+        registro.anotar(Pista(url: url, segundo: cronometro.segundo(), sistema: false))
         inicioTramo = Date()
-        tramos.append((url, cronometro.segundo()))
-        registrar("tramo \(tramos.count) con \(AVCaptureDevice.default(for: .audio)?.localizedName ?? "?"), \(formato)")
+        registrar("archivo \(archivos) con \(AVCaptureDevice.default(for: .audio)?.localizedName ?? "?"), \(formato)")
         return true
     }
 
@@ -357,9 +522,10 @@ final class Microfono {
     func detener() {
         motor?.inputNode.removeTap(onBus: 0)
         motor?.stop()
-        archivo?.close()
+        if let motor { motoresRetirados.append(motor) }  // nunca destruirlo, ver motoresRetirados
+        escritor.cambiar(a: nil)
         motor = nil
-        archivo = nil
+        mono = nil
     }
 }
 
@@ -367,17 +533,17 @@ final class Microfono {
 
 final class Sesion {
     let carpeta: URL
-    let cronometro = Cronometro()
+    let cronometro: Cronometro
+    let registro: RegistroPistas
     var inicio: Date { cronometro.inicio }
     // Cuantos recordatorios de la pausa en curso ya salieron.
     var recordatoriosPausa = 0
     // Segundos grabados al detener, sin las pausas: el largo de la mezcla.
     var duracion: Double = 0
     let conPantalla: Bool
-    let sistema = AudioSistema()
+    let sistema: AudioSistema
     let microfono: Microfono
     var sistemaOK = false
-    var segundoSistema: Double = 0
     var stream: SCStream?
     // Mientras graba, el Mac no entra en reposo por inactividad: en una reunion
     // larga uno escucha sin tocar el teclado. Zoom suele impedirlo por su
@@ -385,15 +551,39 @@ final class Sesion {
     // tapa sin pantalla externa ni corriente: eso lo decide macOS.
     var sinReposo: NSObjectProtocol?
     var video: URL { carpeta.appendingPathComponent("pantalla.mov") }
-    var audioSistema: URL { carpeta.appendingPathComponent("sistema.caf") }
+    // Se escribe al empezar a entregar. Una carpeta con pistas.txt y sin esta marca es
+    // una grabacion que se corto: al abrirse, la app la rearma (ver recuperarCaidas).
+    var marcaEntregada: URL { carpeta.appendingPathComponent("entregada") }
+    static let sello: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        return f
+    }()
 
     init(conPantalla: Bool) throws {
         self.conPantalla = conPantalla
-        let sello = DateFormatter()
-        sello.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        carpeta = CARPETA_PISTAS.appendingPathComponent("Grabadora \(sello.string(from: cronometro.inicio))")
+        cronometro = Cronometro()
+        carpeta = CARPETA_PISTAS.appendingPathComponent("Grabadora \(Sesion.sello.string(from: cronometro.inicio))")
         try FileManager.default.createDirectory(at: carpeta, withIntermediateDirectories: true)
-        microfono = Microfono(carpeta: carpeta, cronometro: cronometro)
+        registro = RegistroPistas(carpeta: carpeta)
+        sistema = AudioSistema(registro: registro, cronometro: cronometro)
+        microfono = Microfono(registro: registro, cronometro: cronometro)
+    }
+
+    /// Una grabacion que se corto, para entregarla con lo que se alcanzo a guardar.
+    init?(recuperando carpeta: URL) {
+        guard let inicio = Sesion.sello.date(from: carpeta.lastPathComponent.replacingOccurrences(of: "Grabadora ", with: "")),
+              let pistas = RegistroPistas.leer(carpeta), !pistas.isEmpty else { return nil }
+        self.carpeta = carpeta
+        cronometro = Cronometro(inicio: inicio)
+        conPantalla = FileManager.default.fileExists(atPath: carpeta.appendingPathComponent("pantalla.mov").path)
+        registro = RegistroPistas(carpeta: carpeta)
+        pistas.forEach(registro.anotarSoloEnMemoria)
+        sistema = AudioSistema(registro: registro, cronometro: cronometro)
+        microfono = Microfono(registro: registro, cronometro: cronometro)
+        sistemaOK = pistas.contains { $0.sistema }
+        // El largo de la mezcla: hasta donde llega la pista que termina mas tarde.
+        duracion = pistas.compactMap { p in duracionAudio(p.url).map { p.segundo + $0 } }.max() ?? 0
     }
 }
 
@@ -404,6 +594,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var sesion: Sesion?
     private var reloj: Timer?
+    private var rotador: Timer?
     private var avisoSinVoz = false
 
     init(raiz: URL) {
@@ -415,6 +606,29 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         NSApp.setActivationPolicy(.accessory)
         escucharCambiosDeMicrofono()
         dibujar()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.recuperarCaidas() }
+    }
+
+    // Si la app se cayo grabando, launchd la reabre vacia y nadie se entera: paso el
+    // 20-10-2026. Al abrirse busca grabaciones sin entregar, avisa y las entrega con
+    // lo que se alcanzo a guardar. Solo mira las de las ultimas 24 horas.
+    private func recuperarCaidas() {
+        guard sesion == nil, let carpetas = try? FileManager.default.contentsOfDirectory(
+            at: CARPETA_PISTAS, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let hora = DateFormatter()
+        hora.dateFormat = "HH:mm"
+        for carpeta in carpetas where !FileManager.default.fileExists(atPath: carpeta.appendingPathComponent("entregada").path) {
+            let cambio = (try? carpeta.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            guard let cambio, Date().timeIntervalSince(cambio) < 24 * 3600,
+                  let cortada = Sesion(recuperando: carpeta) else { continue }
+            let texto = "La grabación de las \(hora.string(from: cortada.inicio)) se cortó: la grabadora se cerró sola. "
+                + "Recuperé lo grabado hasta las \(hora.string(from: cambio)) y se procesa igual."
+            registrar("recuperando \(carpeta.lastPathComponent)")
+            avisar("Una grabación se cortó", texto)
+            avisarAlTelefono("⚠️ " + texto, raiz: raiz)
+            terminar(cortada)
+            return  // una por vez: la siguiente se recupera la proxima vez que abra
+        }
     }
 
     private func escucharCambiosDeMicrofono() {
@@ -564,9 +778,8 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         let conMicrofono = await AVCaptureDevice.requestAccess(for: .audio)
         guard let nueva = try? Sesion(conPantalla: conPantalla) else { return }
         do {
-            try nueva.sistema.empezar(en: nueva.audioSistema, cronometro: nueva.cronometro)
+            try nueva.sistema.empezar()
             nueva.sistemaOK = true
-            nueva.segundoSistema = nueva.cronometro.segundo()
         } catch {
             registrar("no se pudo grabar el audio del sistema: \(error)")
             nueva.sistema.detener()
@@ -594,6 +807,10 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
                                                                 reason: "Grabando una reunión")
         sesion = nueva
         reloj = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.dibujar() }
+        rotador = Timer.scheduledTimer(withTimeInterval: SEGUNDOS_POR_TROZO, repeats: true) { _ in
+            if nueva.sistemaOK { try? nueva.sistema.rotar() }
+            nueva.microfono.rotar()
+        }
         dibujar()
     }
 
@@ -622,6 +839,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         if let sinReposo = sesion.sinReposo { ProcessInfo.processInfo.endActivity(sinReposo) }
         sesion.sistema.detener()
         reloj?.invalidate()
+        rotador?.invalidate()
         self.sesion = nil
         avisoSinVoz = false
         dibujar()
@@ -711,6 +929,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
     }
 
     private func entregar(_ sesion: Sesion, tema: String) {
+        try? Data().write(to: sesion.marcaEntregada)
         guard let ffmpeg = FFMPEG else {
             avisar("Falta ffmpeg", "Instálalo con: brew install ffmpeg. " + pistasGuardadas(sesion))
             return
@@ -734,8 +953,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
 
         // Cada pista entra con su retraso: el sistema y
         // cada tramo del microfono, cada uno desde el segundo en que empezo.
-        var pistas = sesion.microfono.tramos
-        if sesion.sistemaOK { pistas.insert((sesion.audioSistema, sesion.segundoSistema), at: 0) }
+        var pistas = sesion.registro.pistas
         // Solo entran las pistas que ffprobe puede leer. Una sola pista danada
         // hacia fallar la mezcla entera, y la reunion completa quedaba sin
         // procesar: paso en la prueba del 15-10-2026 en Meet, con tres tramos
@@ -757,7 +975,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         // aparecieron frases que antes faltaban. El audio del sistema no se
         // nivela: ya viene parejo, y nivelarlo sube el ruido de sus silencios.
         let retrasos = pistas.indices.map { i in
-            let nivelar = pistas[i].url == sesion.audioSistema ? "" : "dynaudnorm,"
+            let nivelar = pistas[i].sistema ? "" : "dynaudnorm,"
             return "[\(i):a]\(nivelar)adelay=delays=\(Int(pistas[i].segundo * 1000)):all=1[p\(i)]"
         }
         // Tu voz va en el canal izquierdo y la llamada en el derecho, sin
@@ -769,14 +987,16 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
         // la duracion de la sesion (-t). Antes amerge cortaba al terminar el
         // canal mas corto: si el audio de la llamada se caia a mitad de camino,
         // se perdia tu voz desde ahi (revision de codigo del 16-10-2026).
-        let sistema = pistas.indices.filter { pistas[$0].url == sesion.audioSistema }
-        let microfonos = pistas.indices.filter { pistas[$0].url != sesion.audioSistema }
+        let sistema = pistas.indices.filter { pistas[$0].sistema }
+        let microfonos = pistas.indices.filter { !pistas[$0].sistema }
         let dosPistas = !sistema.isEmpty && !microfonos.isEmpty
         var mezcla = retrasos.joined(separator: ";") + ";"
         if dosPistas {
             mezcla += microfonos.map { "[p\($0)]" }.joined()
                 + (microfonos.count > 1 ? "amix=inputs=\(microfonos.count):duration=longest:normalize=0," : "")
-                + "apad[tu];[p\(sistema[0])]aformat=channel_layouts=mono,apad[otros];[tu][otros]amerge=inputs=2[a]"
+                + "apad[tu];" + sistema.map { "[p\($0)]" }.joined()
+                + (sistema.count > 1 ? "amix=inputs=\(sistema.count):duration=longest:normalize=0," : "")
+                + "aformat=channel_layouts=mono,apad[otros];[tu][otros]amerge=inputs=2[a]"
         } else {
             mezcla += pistas.indices.map { "[p\($0)]" }.joined()
                 + "amix=inputs=\(pistas.count):duration=longest:normalize=0[a]"
@@ -820,6 +1040,7 @@ final class Controlador: NSObject, NSApplicationDelegate, SCStreamDelegate, SCRe
 let argumentos = CommandLine.arguments
 if argumentos.dropFirst().first == "--probar" {
     probarCronometro()
+    probarTrozos()
     exit(0)
 }
 guard argumentos.count > 1 else {

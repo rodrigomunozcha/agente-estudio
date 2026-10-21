@@ -70,7 +70,11 @@ ahí entra como clase de ese ramo. Las pistas sueltas quedan en
 `boton_app/compilar_apps.sh` y se instala con `bash launchd/instalar_grabadora.sh`.
 `transcripcion` transcribe cada canal aparte y marca cada frase como "Tú" u "Otros".
 La pausa (solo en modo audio) deja de escribir sin cerrar nada, y los tramos se ubican
-en la mezcla con un cronómetro que descuenta las pausas. Cada 15 minutos de pausa avisa
+en la mezcla con un cronómetro que descuenta las pausas. Cada pista se escribe en archivos de 5 minutos
+(`sistema-N.caf`, `microfono-N.caf`) anotados en `pistas.txt`, porque un AAC sin cerrar
+queda ilegible. Si la app se cae grabando, al reabrirse rearma la grabación con lo que
+quedó, avisa en el Mac y por Telegram, y la entrega. Los motores de micrófono viejos no se
+destruyen: hacerlo tumbó la app el 20-10-2026 al cambiar a los AirPods. Cada 15 minutos de pausa avisa
 en el Mac y por Telegram. Su prueba es `Grabadora --probar`, que corre al compilar.
 
 El camino de una clase:
