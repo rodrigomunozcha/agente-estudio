@@ -9,6 +9,7 @@
 # Para quitarlo:
 #   launchctl bootout gui/$(id -u)/local.agente-estudio.grabadora
 set -e
+source "$(dirname "$0")/comun.sh"
 
 RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$RAIZ/grabadora/Grabadora.app"
@@ -47,8 +48,7 @@ cat > "$AGENTES/$ETIQUETA.plist" <<EOF
 </plist>
 EOF
 plutil -lint "$AGENTES/$ETIQUETA.plist" >/dev/null
-launchctl bootout "gui/$(id -u)/$ETIQUETA" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$AGENTES/$ETIQUETA.plist"
+reinstalar "$ETIQUETA" "$AGENTES/$ETIQUETA.plist"
 
 echo "Listo. Arriba a la derecha quedó un círculo: clic para grabar una reunión."
 echo "La primera vez macOS te pide permiso de Micrófono y de Grabación de audio del"

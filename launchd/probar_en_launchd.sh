@@ -17,6 +17,7 @@
 # El LaunchAgent se retira al terminar. Sus archivos quedan en una carpeta
 # temporal que macOS limpia solo.
 set -euo pipefail
+source "$(dirname "$0")/comun.sh"
 
 if [ $# -lt 1 ] || [ ! -f "$1" ]; then
     echo "Uso: bash launchd/probar_en_launchd.sh <script.py> [segundos maximos]"
@@ -70,8 +71,7 @@ cat > "$TMP/$ETIQUETA.plist" <<EOF
 </plist>
 EOF
 
-launchctl bootout "$DOMINIO/$ETIQUETA" 2>/dev/null || true
-launchctl bootstrap "$DOMINIO" "$TMP/$ETIQUETA.plist"
+reinstalar "$ETIQUETA" "$TMP/$ETIQUETA.plist"
 
 for _ in $(seq "$LIMITE"); do
     [ -f "$TMP/fin" ] && break

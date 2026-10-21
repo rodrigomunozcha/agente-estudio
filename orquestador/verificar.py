@@ -179,6 +179,29 @@ def _configuracion() -> None:
                 f"falta backend/transcriber.py en {transcriptotem}")
 
 
+def _transcriptor_legible() -> None:
+    """Que exista no basta: el 30-09-2026 estaba, pero OneDrive lo habia dejado solo en la
+    nube y la clase fallo al importarlo. Aqui se importa de verdad."""
+    from .config import cargar_config
+    from .transcripcion import _obtener_transcribe
+    try:
+        _obtener_transcribe(cargar_config()["rutas"]["transcriptotem"])
+        _anotar(OK, "el transcriptor se puede leer")
+    except Exception as e:
+        _anotar(FALLA, "el transcriptor no se puede leer", f"{type(e).__name__}: {e}"[:120])
+
+
+def _espacio_en_disco() -> None:
+    import shutil
+    libres = shutil.disk_usage(Path.home()).free / 1e9
+    if libres < 3:
+        _anotar(FALLA, "queda poco espacio en el disco", f"{libres:.1f} GB libres: una clase larga no cabe")
+    elif libres < 10:
+        _anotar(AVISO, "el disco se está llenando", f"{libres:.1f} GB libres")
+    else:
+        _anotar(OK, "espacio en disco", f"{libres:.0f} GB libres")
+
+
 def _cli_de_claude() -> None:
     cli = RAIZ / "node_modules" / ".bin" / "claude"
     if not cli.exists():
@@ -310,6 +333,8 @@ def main() -> int:
     _cli_de_claude()
     _sesion_de_claude()
     _configuracion()
+    _transcriptor_legible()
+    _espacio_en_disco()
 
     print("\nLo que ves mientras trabaja")
     _notificaciones()

@@ -24,6 +24,12 @@ Desde la raíz del repositorio, siempre con el Python 3.13 del instalador oficia
   nombre (`bot.MODELO`, `reuniones.MODELO`).
 - **Ensayo completo contra un sandbox**, sin tocar el vault ni mover audios:
   `$PY -m orquestador.ensayo [<slug>] [--conservar]`. Este sí gasta tokens.
+- **Ensayar es obligatorio antes del commit si el cambio toca cómo se encuentran, leen o
+  mueven los archivos de una clase** (`deteccion`, `transcripcion`, `finalizar_clase`, la
+  lista de pendientes, `onedrive`): corre el ensayo con la última transcripción real. Las
+  pruebas usan archivos de ejemplo y no vieron dos fallas del 18 al 20-10-2026 (el
+  `_whisper.json` que trabó una clase y el título con la fecha repetida), que una clase real
+  habría mostrado. Gasta cuota como procesar una clase, por eso solo en esos cambios.
 - **Procesar Input a mano**, lo mismo que hace el vigilante: `$PY -m orquestador.procesar_input`.
 - **Rehacer una hoja:** `$PY -m orquestador.hoja_html <slug> --pisar` para una clase, y
   `$PY -m orquestador.hoja_evaluacion "<RAMO>" <S1|S2|Examen>` para una evaluación.
@@ -58,6 +64,7 @@ con las rutas de este Mac.
 | `local.agente-estudio.airdrop` | `vigilar_descargas` | Cuando cambia Descargas (AirDrop), `Input/` o la carpeta `rutas.grabaciones_onedrive`, y cada 10 minutos. Si cambias esas rutas, vuelve a correr `launchd/instalar_vigilante.sh` |
 | `local.agente-estudio.bot` | `bot` | Siempre, esperando mensajes de Telegram |
 | `local.agente-estudio.secretaria` | `secretaria` | Todos los días a las 9:00. Si no hay nada que decir, no escribe |
+| `local.agente-estudio.chequeo` | `chequeo` | De lunes a viernes a las 18:00, antes de clases. Solo escribe si algo impediría procesar la clase |
 | `local.agente-estudio.grabadora` | `grabadora/Grabadora.app` | Siempre, como botón en la barra de menú para grabar reuniones on-line |
 
 La grabadora (`grabadora/Grabadora.swift`) graba el audio del sistema con un tap de Core

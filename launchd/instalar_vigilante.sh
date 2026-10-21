@@ -20,6 +20,7 @@
 # Para quitarlo:
 #   launchctl bootout gui/$(id -u)/local.agente-estudio.airdrop
 set -e
+source "$(dirname "$0")/comun.sh"
 
 RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3
@@ -74,8 +75,7 @@ $RUTAS_XML	</array>
 EOF
 
 plutil -lint "$PLIST" >/dev/null
-launchctl bootout "gui/$(id -u)/$ETIQUETA" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+reinstalar "$ETIQUETA" "$PLIST"
 echo "Listo. El vigilante de grabaciones quedo activo ($ETIQUETA). Vigila:"
 printf '  %s\n' "${VIGILADAS[@]}"
 echo "Registro: $RAIZ/orquestador/logs/vigilante.log"

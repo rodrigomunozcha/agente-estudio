@@ -1,5 +1,5 @@
 #!/bin/bash
-# Instala dos LaunchAgents de macOS:
+# Instala tres LaunchAgents de macOS (el chequeo de las 18:00 esta mas abajo):
 #   - el bot de Telegram (orquestador.bot), que queda corriendo siempre y se
 #     reinicia solo si se cae. Mientras espera mensajes no usa CPU: queda
 #     dormido en una conexion abierta con Telegram.
@@ -15,6 +15,7 @@
 #   launchctl bootout gui/$(id -u)/local.agente-estudio.bot
 #   launchctl bootout gui/$(id -u)/local.agente-estudio.secretaria
 set -e
+source "$(dirname "$0")/comun.sh"
 
 RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON=/Library/Frameworks/Python.framework/Versions/3.13/bin/python3
@@ -46,8 +47,7 @@ $3
 </plist>
 EOF
 	plutil -lint "$AGENTES/$1.plist" >/dev/null
-	launchctl bootout "gui/$(id -u)/$1" 2>/dev/null || true
-	launchctl bootstrap "gui/$(id -u)" "$AGENTES/$1.plist"
+	reinstalar "$1" "$AGENTES/$1.plist"
 }
 
 escribir_plist local.agente-estudio.bot orquestador.bot "	<key>RunAtLoad</key>
@@ -65,5 +65,14 @@ escribir_plist local.agente-estudio.secretaria orquestador.secretaria "	<key>Sta
 		<integer>0</integer>
 	</dict>" secretaria.log
 
+# El chequeo antes de clases: de lunes a viernes a las 18:00 (ver orquestador/chequeo.py).
+DIAS=""
+for d in 1 2 3 4 5; do DIAS="$DIAS
+		<dict><key>Weekday</key><integer>$d</integer><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>"; done
+escribir_plist local.agente-estudio.chequeo orquestador.chequeo "	<key>StartCalendarInterval</key>
+	<array>$DIAS
+	</array>" chequeo.log
+
 echo "Listo. El bot quedo corriendo y la secretaria escribe a las 9:00 si hay algo."
+echo "El chequeo antes de clases corre de lunes a viernes a las 18:00 y solo escribe si algo falla."
 echo "Registros: $RAIZ/orquestador/logs/bot.log y secretaria.log"
