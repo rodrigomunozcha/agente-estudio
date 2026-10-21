@@ -14,7 +14,6 @@ Python no se equivoca ni cobra por leerlas. Lo lanza un LaunchAgent a las 9:00
 /evaluaciones.
 """
 import re
-import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -24,11 +23,6 @@ from .config import cargar_config
 from .hoja_evaluacion import NOMBRES, clases_del_ramo, nombre_archivo, ramo_legible
 
 DIAS_ADELANTE = 7
-# A las 9:00 el Mac puede estar recien despertando y sin red todavia: el 12-10-2026
-# el mensaje se perdio con "sin conexión" y nadie lo reintento. Se reintenta una
-# vez por minuto, hasta 15 minutos, y solo si el error es la falta de conexion.
-INTENTOS_SIN_CONEXION = 15
-SEGUNDOS_ENTRE_INTENTOS = 60
 
 _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 _MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
@@ -191,28 +185,19 @@ def seguimientos(datos: dict, hoy: date) -> list[tuple[str, dict]]:
     return salida
 
 
-def _enviar_con_paciencia(funcion, *args, **kwargs) -> None:
-    for intento in range(1, INTENTOS_SIN_CONEXION + 1):
-        try:
-            funcion(*args, **kwargs)
-            return
-        except RuntimeError as e:
-            if "sin conexión" not in str(e) or intento == INTENTOS_SIN_CONEXION:
-                raise
-            time.sleep(SEGUNDOS_ENTRE_INTENTOS)
-
-
 def main() -> None:
     config = cargar_config()
     hoy = date.today()
     datos = evaluaciones.cargar()
     texto, hojas = resumen(hoy, datos, config, fin_de_semana=hoy.weekday() >= 5)
+    # A las 9:00 el Mac puede estar recien despertando y sin red: el 12-10-2026 el mensaje
+    # se perdio. avisar lo deja en la bandeja y el bot lo manda apenas vuelva la conexion.
     if texto is not None:
-        _enviar_con_paciencia(telegram.enviar, texto)
+        telegram.avisar(texto)
         for hoja in hojas:
-            _enviar_con_paciencia(telegram.enviar_documento, hoja, hoja.stem)
+            telegram.avisar(hoja.stem, adjunto=hoja)
     for texto_seg, botones in seguimientos(datos, hoy):
-        _enviar_con_paciencia(telegram.enviar, texto_seg, teclado=botones)
+        telegram.avisar(texto_seg, teclado=botones)
     # Las grabaciones que siguen esperando de que son se recuerdan una vez, aqui: es lo
     # unico que corre todos los dias aunque no llegue nada nuevo.
     pregunta_ramo.recordar()

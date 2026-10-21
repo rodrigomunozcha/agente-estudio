@@ -2800,40 +2800,6 @@ def probar_comprimir_aac_pesado() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
-def probar_secretaria_espera_la_conexion() -> None:
-    """El 12-10-2026 el Mac no tenia red a las 9:00 y el mensaje se perdio. Sin
-    conexion se reintenta, y cualquier otro error no se tapa."""
-    print("\n== la secretaria espera a que vuelva la conexion ==")
-    from orquestador import secretaria as sec
-
-    original_sleep = sec.time.sleep
-    sec.time.sleep = lambda s: None
-    try:
-        llamadas = []
-
-        def falla_dos_veces(texto):
-            llamadas.append(texto)
-            if len(llamadas) < 3:
-                raise RuntimeError("Telegram rechazó sendMessage: sin conexión ([Errno 8])")
-
-        sec._enviar_con_paciencia(falla_dos_veces, "hola")
-        check("sin conexion reintenta hasta que sale", len(llamadas) == 3, str(len(llamadas)))
-
-        def otro_error(texto):
-            llamadas.append(texto)
-            raise RuntimeError("Telegram rechazó sendMessage: chat not found")
-
-        llamadas.clear()
-        try:
-            sec._enviar_con_paciencia(otro_error, "hola")
-            salio = False
-        except RuntimeError:
-            salio = True
-        check("otro error no se reintenta y se ve", salio and len(llamadas) == 1)
-    finally:
-        sec.time.sleep = original_sleep
-
-
 def probar_pedidos_y_secretaria() -> None:
     """
     Lo que el profesor pide para una fecha queda anotado y la secretaria lo
@@ -4488,6 +4454,86 @@ def probar_pendientes_ignora_archivos_secundarios() -> None:
         nombres = [x.name for x in fc._listar_metadatas_pendientes()]
         check("lista solo la ficha que tiene su .txt", nombres == ["2026-10-20_abc.json"], str(nombres))
     finally:
+        usar_dir_pendientes(None)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def probar_bandeja_de_avisos() -> None:
+    """Sin conexion, un aviso no se pierde: espera en la bandeja y sale en orden cuando
+    vuelve la red. Un error que no es de red no la traba."""
+    print("\n== bandeja de avisos sin conexion ==")
+    from orquestador import telegram as tg
+
+    tmp = Path(tempfile.mkdtemp(prefix="bandeja_"))
+    enviados, hay_red = [], {"si": False}
+
+    def mandar(texto, adjunto, teclado):
+        if "ROTO" in texto:
+            raise RuntimeError("Telegram rechazó sendMessage: Bad Request: message is too long")
+        if not hay_red["si"]:
+            raise RuntimeError("Telegram rechazó sendMessage: sin conexión ([Errno 8])")
+        enviados.append(texto)
+
+    originales = (tg.BANDEJA, tg._mandar, tg.token, tg.chat_autorizado)
+    tg.BANDEJA, tg._mandar = tmp / "pendientes.jsonl", mandar
+    tg.token, tg.chat_autorizado = (lambda: "falso"), (lambda: 1)
+    try:
+        check("sin red, el aviso no sale", tg.avisar("primero") is False and enviados == [])
+        tg.avisar("segundo")
+        check("y quedan los dos en la bandeja", len(tg.BANDEJA.read_text().splitlines()) == 2)
+        hay_red["si"] = True
+        tg.reenviar_pendientes()
+        check("al volver la red salen en orden, marcados como atrasados",
+              len(enviados) == 2 and "Aviso atrasado" in enviados[0] and enviados[0].endswith("primero")
+              and enviados[1].endswith("segundo"), str(enviados))
+        check("y la bandeja queda vacia", tg.BANDEJA.read_text() == "")
+        tg.avisar("tercero")
+        check("con red, un aviso nuevo sale directo", enviados[-1] == "tercero")
+        check("con red, un aviso con error que no es de red no entra a la bandeja",
+              tg.avisar("ROTO de verdad") is False and tg.BANDEJA.read_text() == "")
+        tg.BANDEJA.write_text('{"texto": "ROTO viejo", "adjunto": null, "teclado": null, "hora": "x"}\n'
+                              '{"texto": "cuarto", "adjunto": null, "teclado": null, "hora": "x"}\n')
+        tg.reenviar_pendientes()
+        check("un aviso roto en la bandeja se descarta y no traba los de atras",
+              enviados[-1].endswith("cuarto") and tg.BANDEJA.read_text() == "", str(enviados))
+    finally:
+        tg.BANDEJA, tg._mandar, tg.token, tg.chat_autorizado = originales
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def probar_vigia_de_atascos() -> None:
+    """Lo que lleva mas de 2 horas sin procesarse se avisa una vez, aunque no haya error.
+    Asi habrian salido las dos fallas silenciosas del 20-10-2026."""
+    print("\n== vigia de atascos ==")
+    import time as _time
+
+    from orquestador import bot as b
+
+    tmp = Path(tempfile.mkdtemp(prefix="vigia_"))
+    entrada, pend = tmp / "Input", tmp / "pendientes"
+    entrada.mkdir(); pend.mkdir()
+    (entrada / "clase.m4a").write_bytes(b"audio")
+    (entrada / ".DS_Store").write_bytes(b"")
+    (pend / "2026-10-20_a.txt").write_text("t"); (pend / "2026-10-20_a.json").write_text('{"reconocido": true}')
+    (pend / "2026-10-20_b.txt").write_text("t"); (pend / "2026-10-20_b.json").write_text('{"reconocido": true}')
+    (pend / "2026-10-20_b_skill.json").write_text("{}")
+    (pend / "2026-10-20_c.txt").write_text("t"); (pend / "2026-10-20_c.json").write_text('{"reconocido": false}')
+    avisos = []
+    originales = (b.RUTA_VIGIA, b.telegram.avisar)
+    b.RUTA_VIGIA, b.telegram.avisar = tmp / "vigia.json", (lambda texto, **k: avisos.append(texto))
+    usar_dir_pendientes(pend)
+    config = {"rutas": {"input": str(entrada)}}
+    try:
+        check("lo reciente no se avisa", b.vigilar_atascos(config) == [] and avisos == [])
+        en_3_horas = _time.time() + 3 * 3600
+        nuevos = b.vigilar_atascos(config, ahora=en_3_horas)
+        check("a las 2 horas avisa el audio en Input y la clase transcrita sin procesar",
+              len(nuevos) == 2 and "clase.m4a" in nuevos[0] and "2026-10-20_a" in nuevos[1], str(nuevos))
+        check("ni lo ya procesado, ni lo que espera el ramo, ni los archivos ocultos",
+              not any(x in avisos[0] for x in ("_b", "_c", "DS_Store")), avisos[0])
+        check("cada cosa se avisa una sola vez", b.vigilar_atascos(config, ahora=en_3_horas) == [] and len(avisos) == 1)
+    finally:
+        b.RUTA_VIGIA, b.telegram.avisar = originales
         usar_dir_pendientes(None)
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -53,7 +53,7 @@ from claude_agent_sdk import (
 )
 
 from . import evaluaciones, memoria, onedrive, pregunta_ramo, reuniones, secretaria, telegram
-from .config import cargar_config, guardar_config
+from .config import cargar_config, dir_pendientes, guardar_config
 from .hoja_evaluacion import NOMBRES, ramo_legible
 from .hoja_html import HERRAMIENTAS_PROHIBIDAS
 from .ramo_por_nombre import RECONOCIDO
@@ -747,6 +747,50 @@ def emparejar(chat_id: str | None) -> None:
     print(f"Emparejado con {chat_id}.")
 
 
+HORAS_ATASCO = 2
+VIGIA_CADA_SEGUNDOS = 10 * 60
+RUTA_VIGIA = Path(__file__).parent / "logs" / "vigia.json"
+
+
+def vigilar_atascos(config: dict, ahora: float | None = None) -> list[str]:
+    """
+    Avisa lo que lleva mas de HORAS_ATASCO sin procesarse, aunque nadie haya registrado un
+    error. Las dos fallas del 20-10-2026 fueron silenciosas: la grabadora se cayo y una
+    clase quedo transcrita sin procesar, y nada aviso. Aqui se mira la ausencia del exito,
+    no el error. Cada cosa se avisa una vez. Devuelve lo que aviso.
+    """
+    ahora = ahora or time.time()
+    atascos = []
+    entrada = Path(config["rutas"]["input"])
+    for f in sorted(entrada.iterdir()) if entrada.exists() else []:
+        # st_ctime y no st_mtime: un audio de AirDrop trae la hora en que se grabo, y
+        # cambia de ctime al moverse a Input.
+        if not f.name.startswith(".") and f.suffix != ".part" and ahora - f.stat().st_ctime > HORAS_ATASCO * 3600:
+            atascos.append(f"🎧 {f.name} sigue en Input")
+    for ficha in sorted(dir_pendientes().glob("*.json")):
+        base = str(ficha.with_suffix(""))
+        if (not ficha.with_suffix(".txt").exists() or ahora - ficha.stat().st_mtime < HORAS_ATASCO * 3600
+                or any(Path(base + s + ".json").exists() for s in ("_skill", "_reunion"))):
+            continue
+        try:
+            reconocido = json.loads(ficha.read_text(encoding="utf-8")).get("reconocido")
+        except (OSError, ValueError):
+            reconocido = True
+        if reconocido:  # sin ramo, espera la respuesta del estudiante (ver pregunta_ramo)
+            atascos.append(f"📝 La transcripción {ficha.stem} está lista, pero no se procesó")
+    try:
+        avisados = set(json.loads(RUTA_VIGIA.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        avisados = set()
+    nuevos = [a for a in atascos if a not in avisados]
+    if nuevos:
+        telegram.avisar("⏳ Algo quedó atascado, sin ningún error a la vista\n" + "\n".join(nuevos)
+                        + f"\n\nLleva más de {HORAS_ATASCO} horas así.\n👉 Cuéntamelo en una sesión de Claude y lo reviso.")
+    RUTA_VIGIA.parent.mkdir(parents=True, exist_ok=True)
+    RUTA_VIGIA.write_text(json.dumps(sorted(set(atascos)), ensure_ascii=False), encoding="utf-8")
+    return nuevos
+
+
 def main() -> None:
     chat = telegram.chat_autorizado()
     if not chat:
@@ -754,6 +798,7 @@ def main() -> None:
         raise SystemExit(1)
     telegram.llamar("setMyCommands", commands=[{"command": c, "description": d} for c, d in COMANDOS])
     offset = None
+    ultima_vigia = 0.0
     while True:
         params = {"timeout": 50, "allowed_updates": ["message", "callback_query"]}
         if offset is not None:
@@ -764,6 +809,14 @@ def main() -> None:
             print(f"{datetime.now():%d-%m %H:%M} sin conexión con Telegram: {e}", flush=True)
             time.sleep(10)
             continue
+        # Con conexion de vuelta: lo que no se pudo avisar antes, y lo que quedo atascado.
+        try:
+            telegram.reenviar_pendientes()
+            if time.time() - ultima_vigia > VIGIA_CADA_SEGUNDOS:
+                ultima_vigia = time.time()
+                vigilar_atascos(cargar_config())
+        except Exception:
+            traceback.print_exc()
         for u in actualizaciones:
             offset = u["update_id"] + 1
             try:

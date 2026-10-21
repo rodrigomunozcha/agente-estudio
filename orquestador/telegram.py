@@ -12,11 +12,13 @@ Limites verificados el 29-09-2026 en core.telegram.org/bots/api: mensaje de 1 a
 4096 caracteres, callback_data de 1 a 64 bytes, leyenda de documento hasta 1024,
 descarga de archivos hasta 20 MB, y el "escribiendo..." dura 5 segundos o menos.
 """
+import fcntl
 import json
 import subprocess
 import urllib.error
 import urllib.request
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from .config import cargar_config
@@ -25,6 +27,10 @@ SERVICIO_LLAVERO = "agente-estudio-telegram"
 MAX_TEXTO = 4096
 MAX_LEYENDA = 1024
 TIMEOUT_SEGUNDOS = 15
+# Avisos que no se pudieron enviar, en orden, para reenviarlos apenas vuelva la conexion.
+# El 12-10-2026 el mensaje de las 9:00 se perdio sin internet, y en un dia normal hay
+# entre 15 y 80 cortes cortos: un aviso de error que caia en uno se perdia en silencio.
+BANDEJA = Path(__file__).parent / "logs" / "telegram_pendientes.jsonl"
 
 _token: str | None = None
 
@@ -182,19 +188,77 @@ def descargar(file_id: str, destino: Path) -> Path:
     return destino
 
 
+def _mandar(texto: str, adjunto: str | None, teclado: dict | None) -> None:
+    if adjunto is not None and Path(adjunto).is_file():
+        enviar_documento(Path(adjunto), texto)
+    else:
+        enviar(texto, teclado=teclado)
+
+
 def avisar(texto: str, adjunto: Path | None = None, teclado: dict | None = None) -> bool:
     """
     Copia al iPhone de un aviso del pipeline. Nunca lanza ni demora el
-    procesamiento: sin token, sin chat emparejado o sin red, se omite y queda
-    el aviso de macOS, que ya salio.
+    procesamiento. Sin red, el aviso queda en la bandeja y sale cuando vuelve la
+    conexion (ver reenviar_pendientes). Sin token o sin chat emparejado se omite.
     """
-    try:
-        if not token() or not chat_autorizado():
-            return False
-        if adjunto is not None and Path(adjunto).is_file():
-            enviar_documento(Path(adjunto), texto)
-        else:
-            enviar(texto, teclado=teclado)
-        return True
-    except Exception:
+    if not token() or not chat_autorizado():
         return False
+    pendiente = {"texto": texto, "adjunto": str(adjunto) if adjunto else None, "teclado": teclado,
+                 "hora": datetime.now().strftime("%d-%m %H:%M")}
+    with _bandeja() as lista:
+        if not _vaciar(lista):  # lo atrasado sale primero, para no desordenar los avisos
+            lista.append(pendiente)
+            return False
+        try:
+            _mandar(texto, pendiente["adjunto"], teclado)
+            return True
+        except Exception as e:
+            if _sin_conexion(e):
+                lista.append(pendiente)
+            return False
+
+
+def reenviar_pendientes() -> None:
+    """Lo llama el bot en cada vuelta: si hay avisos atrasados y ya hay red, salen."""
+    if BANDEJA.exists():
+        with _bandeja() as lista:
+            _vaciar(lista)
+
+
+def _vaciar(lista: list) -> bool:
+    """Envia en orden lo atrasado. Devuelve si quedo vacia."""
+    while lista:
+        p = lista[0]
+        try:
+            _mandar(f"⏰ Aviso atrasado (de las {p['hora']}, sin conexión)\n{p['texto']}", p["adjunto"], p["teclado"])
+        except Exception as e:
+            if _sin_conexion(e):
+                return False
+            # Un error que no es de red (archivo muy grande, chat equivocado) no se arregla
+            # esperando: si se quedara, trabaria para siempre todos los avisos de atras.
+            print(f"aviso descartado de la bandeja: {e}", flush=True)
+        lista.pop(0)
+    return True
+
+
+def _sin_conexion(e: Exception) -> bool:
+    return "sin conexión" in str(e)
+
+
+class _bandeja:
+    """La bandeja en disco, con candado: la usan a la vez el bot, el vigilante y la secretaria."""
+    def __enter__(self) -> list:
+        BANDEJA.parent.mkdir(parents=True, exist_ok=True)
+        self._candado = open(BANDEJA.with_suffix(".lock"), "w")
+        fcntl.flock(self._candado, fcntl.LOCK_EX)
+        texto = BANDEJA.read_text(encoding="utf-8") if BANDEJA.exists() else ""
+        self.lista = [json.loads(l) for l in texto.splitlines() if l.strip()]
+        return self.lista
+
+    def __exit__(self, *_):
+        if self.lista:
+            BANDEJA.write_text("".join(json.dumps(p, ensure_ascii=False) + "\n" for p in self.lista), encoding="utf-8")
+        elif BANDEJA.exists():
+            BANDEJA.write_text("", encoding="utf-8")
+        fcntl.flock(self._candado, fcntl.LOCK_UN)
+        self._candado.close()

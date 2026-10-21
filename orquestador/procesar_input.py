@@ -15,6 +15,7 @@ que nadie va a ver.
 # Homebrew entra al PATH en orquestador/__init__.py, que corre antes que este modulo.
 import sys
 import time
+import traceback
 from pathlib import Path
 
 import anyio
@@ -103,6 +104,9 @@ def main(avisar_si_espera: bool = False) -> None:
             )
             return
         except Exception:
+            # Un error que nadie atrapo antes tambien llega a Telegram: el 20-10-2026 uno asi
+            # dejo una clase transcrita sin procesar, y solo quedo en vigilante.log.
+            notificaciones.notificar_error("El procesamiento de clases", traceback.format_exc())
             estado_vivo.terminar("El procesamiento se interrumpió", error=True)
             raise
 
