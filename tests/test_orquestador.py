@@ -936,6 +936,8 @@ def probar_titulo_nunca_falta() -> None:
 
     check("un titulo en blanco cuenta como ausente",
           normalizar_resultado({"titulo": "   "}, "R")["titulo"] == "R")
+    check("al titulo se le quita el prefijo de fecha que copia la skill",
+          normalizar_resultado({"titulo": "Clase 2026-10-20 - Bitcoin y dinero"}, "R")["titulo"] == "Bitcoin y dinero")
     check("un titulo que no es texto cuenta como ausente",
           normalizar_resultado({"titulo": 5}, "R")["titulo"] == "R")
     check("un titulo bueno no se toca",

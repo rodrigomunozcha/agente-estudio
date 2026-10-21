@@ -47,6 +47,7 @@ Al terminar, la skill reporta todo en una linea "RESULTADO_ORQUESTADOR: {...}"
 """
 import dataclasses
 import json
+import re
 from pathlib import Path
 
 import anyio
@@ -349,6 +350,10 @@ def normalizar_resultado(resultado: dict, titulo_respaldo: str) -> dict:
         # Sin ramo tampoco se queda en blanco: nombre_base pega el titulo
         # despues de un " - ", y uno vacio deja el archivo terminado en guion.
         resultado["titulo"] = titulo_respaldo.strip() or "Clase sin titulo"
+    else:
+        # Desde el 19-10-2026 la skill copia el prefijo de sus notas ("Clase 2026-10-20 - ...")
+        # al titulo, y la carpeta de la clase quedaba con la fecha dos veces.
+        resultado["titulo"] = re.sub(r"^Clase \d{4}-\d{2}-\d{2}\s*-\s*", "", titulo.strip()) or titulo.strip()
     if not isinstance(resultado.get("conceptos_repetidos"), list):
         # La hoja se arma igual sin esa seccion (ver hoja_html.py).
         resultado["conceptos_repetidos"] = []
