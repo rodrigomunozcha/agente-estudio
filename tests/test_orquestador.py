@@ -4561,7 +4561,7 @@ def probar_clase_dificil_espera_la_noche():
 
     def trabajo(ramo, dudosas):
         return {"reconocido": True, "ramo": ramo, "archivos": [], "segmentos_whisper": crudos(dudosas)}
-    dificil, buena, reunion = trabajo("RAMO DE PRUEBA", 250), trabajo("RAMO DE PRUEBA", 100), trabajo("REUNIÓN", 250)
+    dificil, buena, reunion = trabajo("RAMO DE PRUEBA", 250), trabajo("RAMO DE PRUEBA", 60), trabajo("REUNIÓN", 250)
     check("la clase dificil queda marcada", tr._dudosas_si_espera_la_noche(dificil) == 0.25 and "nocturna" in dificil)
     check("la de buen audio no", tr._dudosas_si_espera_la_noche(buena) is None and "nocturna" not in buena)
     check("la reunion tampoco: se revisa apenas termina",

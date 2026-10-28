@@ -38,9 +38,11 @@ HORA_LIMITE = 7
 
 # Una palabra es dudosa si Whisper le dio menos de esta probabilidad. Medido sobre las
 # clases del 19 al 26-10-2026 con turbo: entre 5,8% y 23,4% de palabras dudosas. La del
-# 20-10-2026, de buen audio, quedo en 5,8%. Sobre 20% quedan las dos peores.
+# 20-10-2026, de buen audio, quedo en 5,8%. Empezo en 20%, que dejaba pasar solo la
+# peor. El estudiante lo bajo a 10% el 28-10-2026: prefiere mas clases con large-v3,
+# aunque lleguen en la mañana. Con 10%, de esas cinco solo la del 20-10 no espera.
 PROBABILIDAD_DUDOSA = 0.5
-UMBRAL_DUDOSAS = 0.20
+UMBRAL_DUDOSAS = 0.10
 # Con pocas palabras el porcentaje no dice nada: un audio de 2 minutos no se juzga.
 MINIMO_PALABRAS = 500
 

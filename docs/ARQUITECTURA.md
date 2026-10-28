@@ -101,7 +101,7 @@ El camino de una clase:
    `<slug>_whisper.json`, la salida cruda de Whisper: cada segmento con sus tiempos y su
    confianza, y cada palabra con su probabilidad. Es para medir la transcripción sin volver
    a pasar el audio por Whisper. Ninguna etapa lo lee todavía.
-   Si más del 20 % de las palabras salió dudoso, la clase no sigue esa noche: espera a que
+   Si más del 10 % de las palabras salió dudoso, la clase no sigue esa noche: espera a que
    `nocturna` la transcriba con large-v3 a las 4:00, y se avisa por Telegram para dejar el Mac
    enchufado y despierto. Su audio queda en `Input/` a propósito.
 4. `finalizar_clase` encadena el resto: `skill_runner` (la skill escribe las notas en el
