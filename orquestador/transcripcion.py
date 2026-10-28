@@ -26,11 +26,11 @@ import tempfile
 import time
 from collections import Counter
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from . import cancelacion, deteccion, estado_vivo, pregunta_ramo, ramo_por_nombre
+from . import cancelacion, deteccion, estado_vivo, nocturna, pregunta_ramo, ramo_por_nombre
 from .config import cargar_config, dir_pendientes, guardar_config
 from .deteccion import construir_trabajos, marcar_emitido
 from .nombres import calcular_numero_clase_por_orden, fecha_corta, slug_pendiente
@@ -40,16 +40,49 @@ from .uso import registrar_transcripcion
 PERFIL_WHISPER_POR_DEFECTO = "es-chile"
 
 
-def _obtener_transcribe(transcriptotem_dir: str):
+MODELO_RESPALDO = "mlx-community/whisper-large-v3-turbo"
+
+
+def _obtener_transcribe(transcriptotem_dir: str, modelo: str | None = None):
+    """Sin `modelo`, el de Transcriptotem (turbo). Con otro, de respaldo turbo si ese
+    copia la pista inicial (ver _transcribir_con_respaldo)."""
     ruta = str(Path(transcriptotem_dir))
     if ruta not in sys.path:
         sys.path.insert(0, ruta)
-    from backend.transcriber import transcribe
-    return transcribe
+    from backend.transcriber import _build_initial_prompt, transcribe
+    if modelo is None:
+        return transcribe
+
+    def transcribir(audio_path, language_profile, context_text=""):
+        return _transcribir_con_respaldo(transcribe, modelo, _build_initial_prompt(language_profile, context_text),
+                                         audio_path, language_profile, context_text)
+    return transcribir
 
 
-def transcribir_trabajo(trabajo: dict, config: dict) -> str:
-    transcribe = _obtener_transcribe(config["rutas"]["transcriptotem"])
+def _repite_la_pista(texto: str, pista: str) -> bool:
+    """Si alguna linea del texto es una frase de la pista inicial, tal cual. Un
+    profesor no dice "Contexto academico formal." como frase suelta: es Whisper
+    copiando la pista en vez de escuchar el audio."""
+    def normal(s: str) -> str:
+        return re.sub(r"[^\w ]", "", s).strip().lower()
+    frases = {normal(f) for f in re.split(r"[.\n]", pista) if len(normal(f)) > 10}
+    return any(normal(linea) in frases for linea in texto.splitlines())
+
+
+def _transcribir_con_respaldo(transcribe, modelo: str, pista: str, audio_path: str, perfil: str, contexto: str):
+    """large-v3, en 20 minutos de la clase del 09-10-2026, escribio dos veces
+    "Contexto academico formal." en vez de los primeros 2 o 3 minutos, y lo que el
+    profesor dijo ahi se perdio. Turbo no lo hizo. Un tramo asi se rehace con turbo.
+    Si turbo tambien la repite, queda el de turbo: el resto del texto sirve igual."""
+    resultado = transcribe(audio_path, language_profile=perfil, model_name=modelo, context_text=contexto)
+    if _repite_la_pista(resultado[0], pista):
+        resultado = transcribe(audio_path, language_profile=perfil, model_name=MODELO_RESPALDO,
+                               context_text=contexto)
+    return resultado
+
+
+def transcribir_trabajo(trabajo: dict, config: dict, modelo: str | None = None) -> str:
+    transcribe = _obtener_transcribe(config["rutas"]["transcriptotem"], modelo)
     perfil = trabajo["perfil_whisper"] or PERFIL_WHISPER_POR_DEFECTO
     # Se probó darle a Whisper los títulos de las clases anteriores del ramo, con
     # el ramo al final del prompt de Transcriptotem (09-10-2026). En 20 minutos
@@ -73,7 +106,8 @@ def transcribir_trabajo(trabajo: dict, config: dict) -> str:
     # esa primera prueba dio a large-v3 más rápido porque turbo corrió al mismo
     # tiempo que otra transcripción del agente. Large-v3 además copiaba a veces la
     # pista inicial en vez de escuchar ("Contexto académico formal." dos veces) y
-    # perdía esos minutos.
+    # perdía esos minutos. Desde el 28-10-2026 vuelve solo para las clases de audio
+    # difícil, a las 4:00, cuando nadie usa el Mac (ver nocturna.py).
     contexto = trabajo.get("contexto") or ""
     archivos = trabajo["archivos"]
     partes = []
@@ -105,7 +139,8 @@ def transcribir_trabajo(trabajo: dict, config: dict) -> str:
         # depender de una constante escrita a mano (ver uso.py).
         # ponytail: una grabacion de dos pistas no se mide. Transcribe hasta dos
         # canales, y su tiempo bajaria la velocidad estimada de las clases.
-        if not es_de_dos_pistas(ruta_audio):
+        # Tampoco la de madrugada con otro modelo: tarda unas cuatro veces mas que turbo.
+        if not es_de_dos_pistas(ruta_audio) and modelo is None:
             registrar_transcripcion(trabajo.get("clave", "?"), duracion, time.monotonic() - comenzo)
         if len(archivos) > 1:
             texto = f"--- Parte {i} ({Path(ruta_audio).name}) ---\n{texto}"
@@ -674,6 +709,20 @@ def _aplicar_decision_de_pantalla(trabajo: dict, decision: dict, config: dict) -
     return "seguir"
 
 
+def _dudosas_si_espera_la_noche(trabajo: dict) -> float | None:
+    """Si la clase tiene audio dificil, la marca para large-v3 a las 4:00 y devuelve la
+    fraccion de palabras dudosas (ver nocturna.py). Las reuniones no esperan: se
+    revisan apenas terminan, y la grabadora del Mac ya da buen audio."""
+    if (not trabajo["reconocido"] or trabajo.get("ramo") == pregunta_ramo.REUNION
+            or any(es_de_dos_pistas(a) for a in trabajo["archivos"])):
+        return None
+    dudosas = nocturna.palabras_dudosas(trabajo.get("segmentos_whisper") or [])
+    if dudosas is None or dudosas <= nocturna.UMBRAL_DUDOSAS:
+        return None
+    trabajo["nocturna"] = nocturna.hora_limite(datetime.now()).isoformat()
+    return dudosas
+
+
 def procesar_pendientes(config: dict | None = None, bitacora=None, decidir=None) -> list[dict]:
     """
     `decidir` existe para poder probar sin escribirle a nadie. Por defecto es
@@ -708,8 +757,12 @@ def procesar_pendientes(config: dict | None = None, bitacora=None, decidir=None)
 
         try:
             texto = transcribir_trabajo(trabajo, config)
+            dudosas = _dudosas_si_espera_la_noche(trabajo)
             if trabajo["reconocido"]:
                 _guardar_pendiente(trabajo, texto, bitacora)
+                if dudosas is not None:
+                    notificar_aviso("Clase con audio difícil",
+                                    nocturna.aviso(trabajo["ramo"], fecha_corta(trabajo["fecha"]), dudosas))
             else:
                 _guardar_sin_clasificar(trabajo, texto, config["rutas"]["output"])
                 _sacar_de_input(trabajo, config, "_Sin clasificar", bitacora)

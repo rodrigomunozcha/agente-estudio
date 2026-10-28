@@ -43,7 +43,7 @@ from .hoja_html import (
     tarjeta_lo_que_pidio,
 )
 from .ensayo import es_ensayo
-from . import estado_vivo, evaluaciones, hoja_evaluacion, material_ramo, reuniones
+from . import estado_vivo, evaluaciones, hoja_evaluacion, material_ramo, nocturna, reuniones
 from .nombres import carpeta_por_fecha, renumerar_clases_ramo
 from .notificaciones import notificar_aviso, notificar_error, notificar_exito, notificar_progreso
 from .revisor import hallazgos_graves, leer_calidad, revisar
@@ -458,6 +458,8 @@ async def procesar_pendientes_reconocidos(config: dict | None = None, bitacora=N
             continue
         if _clase_ya_archivada(trabajo_metadata):
             continue  # ya se proceso antes
+        if nocturna.espera_la_noche(trabajo_metadata):
+            continue  # audio dificil: la procesa nocturna.py despues de transcribirla con large-v3
 
         try:
             # Una reunion no es clase: tiene su propio analisis (ver reuniones.py).

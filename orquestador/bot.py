@@ -52,7 +52,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
-from . import evaluaciones, memoria, onedrive, pregunta_ramo, reuniones, secretaria, telegram
+from . import evaluaciones, memoria, nocturna, onedrive, pregunta_ramo, reuniones, secretaria, telegram
 from .config import cargar_config, dir_pendientes, guardar_config
 from .hoja_evaluacion import NOMBRES, ramo_legible
 from .hoja_html import HERRAMIENTAS_PROHIBIDAS
@@ -762,7 +762,11 @@ def vigilar_atascos(config: dict, ahora: float | None = None) -> list[str]:
     ahora = ahora or time.time()
     atascos = []
     entrada = Path(config["rutas"]["input"])
+    # Una clase de audio dificil espera las 4:00 a proposito, con su audio en Input (nocturna.py).
+    en_espera = nocturna.audios_en_espera()
     for f in sorted(entrada.iterdir()) if entrada.exists() else []:
+        if str(f) in en_espera:
+            continue
         # st_ctime y no st_mtime: un audio de AirDrop trae la hora en que se grabo, y
         # cambia de ctime al moverse a Input.
         if not f.name.startswith(".") and f.suffix != ".part" and ahora - f.stat().st_ctime > HORAS_ATASCO * 3600:
@@ -773,7 +777,8 @@ def vigilar_atascos(config: dict, ahora: float | None = None) -> list[str]:
                 or any(Path(base + s + ".json").exists() for s in ("_skill", "_reunion"))):
             continue
         try:
-            reconocido = json.loads(ficha.read_text(encoding="utf-8")).get("reconocido")
+            datos = json.loads(ficha.read_text(encoding="utf-8"))
+            reconocido = datos.get("reconocido") and not nocturna.espera_la_noche(datos)
         except (OSError, ValueError):
             reconocido = True
         if reconocido:  # sin ramo, espera la respuesta del estudiante (ver pregunta_ramo)

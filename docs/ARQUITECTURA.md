@@ -55,7 +55,7 @@ actividad queda en `Estado.txt`.
 
 ## Cómo encaja todo
 
-Cuatro LaunchAgents corren solos. Los instalan `launchd/instalar_vigilante.sh`,
+Cinco LaunchAgents corren solos. Los instalan `launchd/instalar_vigilante.sh`,
 `launchd/instalar_bot.sh` y `launchd/instalar_grabadora.sh`, que arman los `.plist`
 con las rutas de este Mac.
 
@@ -64,6 +64,7 @@ con las rutas de este Mac.
 | `local.agente-estudio.airdrop` | `vigilar_descargas` | Cuando cambia Descargas (AirDrop), `Input/` o la carpeta `rutas.grabaciones_onedrive`, y cada 10 minutos. Si cambias esas rutas, vuelve a correr `launchd/instalar_vigilante.sh` |
 | `local.agente-estudio.bot` | `bot` | Siempre, esperando mensajes de Telegram |
 | `local.agente-estudio.secretaria` | `secretaria` | Todos los días a las 9:00. Si no hay nada que decir, no escribe |
+| `local.agente-estudio.nocturna` | `nocturna` | A las 4:00 y a las 7:05. Rehace con large-v3 las clases de audio difícil, y a las 7:05 procesa con el texto de turbo las que no alcanzaron. Si no hay ninguna, no hace nada |
 | `local.agente-estudio.grabadora` | `grabadora/Grabadora.app` | Siempre, como botón en la barra de menú para grabar reuniones on-line |
 
 La grabadora (`grabadora/Grabadora.swift`) graba el audio del sistema con un tap de Core
@@ -100,6 +101,9 @@ El camino de una clase:
    `<slug>_whisper.json`, la salida cruda de Whisper: cada segmento con sus tiempos y su
    confianza, y cada palabra con su probabilidad. Es para medir la transcripción sin volver
    a pasar el audio por Whisper. Ninguna etapa lo lee todavía.
+   Si más del 20 % de las palabras salió dudoso, la clase no sigue esa noche: espera a que
+   `nocturna` la transcriba con large-v3 a las 4:00, y se avisa por Telegram para dejar el Mac
+   enchufado y despierto. Su audio queda en `Input/` a propósito.
 4. `finalizar_clase` encadena el resto: `skill_runner` (la skill escribe las notas en el
    vault de Obsidian), `revisor` en sesión aparte, la corrección, los anuncios y pedidos del
    profesor hacia `evaluaciones.json`, `hoja_html`, el `archivado` del audio y su

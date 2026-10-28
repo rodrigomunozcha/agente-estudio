@@ -4543,6 +4543,103 @@ def probar_vigia_de_atascos() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def probar_clase_dificil_espera_la_noche():
+    print("\n[nocturna] la clase de audio dificil espera las 4:00 y nadie la da por atascada")
+    import json
+    from datetime import datetime as dt
+    from orquestador import nocturna, transcripcion as tr
+
+    def crudos(dudosas, total=1000):
+        return [{"words": [[0, 1, "p", 0.3 if i < dudosas else 0.9] for i in range(total)]}]
+
+    check("mide la fraccion de palabras dudosas", nocturna.palabras_dudosas(crudos(250)) == 0.25)
+    check("con pocas palabras no juzga", nocturna.palabras_dudosas(crudos(100, total=200)) is None)
+    check("una clase de las 22:00 espera hasta las 7:00 del dia siguiente",
+          nocturna.hora_limite(dt(2026, 10, 27, 22, 0)) == dt(2026, 10, 28, 7, 0))
+    check("una de las 2:00 espera hasta las 7:00 de ese mismo dia",
+          nocturna.hora_limite(dt(2026, 10, 28, 2, 0)) == dt(2026, 10, 28, 7, 0))
+
+    def trabajo(ramo, dudosas):
+        return {"reconocido": True, "ramo": ramo, "archivos": [], "segmentos_whisper": crudos(dudosas)}
+    dificil, buena, reunion = trabajo("RAMO DE PRUEBA", 250), trabajo("RAMO DE PRUEBA", 100), trabajo("REUNIÓN", 250)
+    check("la clase dificil queda marcada", tr._dudosas_si_espera_la_noche(dificil) == 0.25 and "nocturna" in dificil)
+    check("la de buen audio no", tr._dudosas_si_espera_la_noche(buena) is None and "nocturna" not in buena)
+    check("la reunion tampoco: se revisa apenas termina",
+          tr._dudosas_si_espera_la_noche(reunion) is None and "nocturna" not in reunion)
+
+    tmp = Path(tempfile.mkdtemp(prefix="nocturna_"))
+    usar_dir_pendientes(tmp)
+    procesadas, rehechas = [], []
+    from orquestador import estado_vivo, finalizar_clase
+    originales = (finalizar_clase.procesar_pendientes_reconocidos, nocturna._rehacer, estado_vivo.iniciar,
+                  estado_vivo.terminar, _telegram.silencio)
+
+    async def procesar(config, bitacora=None):
+        procesadas.append(sorted(p.stem for p in tmp.glob("*.json")
+                                 if not json.loads(p.read_text(encoding="utf-8")).get("nocturna")))
+    finalizar_clase.procesar_pendientes_reconocidos = procesar
+    nocturna._rehacer = lambda ruta, ficha, config: rehechas.append(ficha["slug"])
+    estado_vivo.iniciar = estado_vivo.terminar = lambda *a, **k: None
+
+    def ficha(slug, limite):
+        (tmp / f"{slug}.txt").write_text("texto de turbo", encoding="utf-8")
+        (tmp / f"{slug}.json").write_text(json.dumps(
+            {"slug": slug, "reconocido": True, "ramo": "RAMO DE PRUEBA", "fecha": "2026-10-27",
+             "nocturna": limite, "archivos_originales": [f"/Input/{slug}.m4a"]}), encoding="utf-8")
+    try:
+        ficha("clase", "2026-10-28T07:00:00")
+        check("su audio queda en espera, para que el bot no lo de por atascado",
+              nocturna.audios_en_espera(dt(2026, 10, 27, 23, 0)) == {"/Input/clase.m4a"})
+        nocturna.main(dt(2026, 10, 28, 6, 30))
+        check("si launchd la corre tarde, al abrir el Mac a las 6:30, no transcribe con el estudiante encima",
+              rehechas == [] and procesadas == [], f"{rehechas} {procesadas}")
+        nocturna.main(dt(2026, 10, 28, 4, 0))
+        check("a las 4:00 la rehace con large-v3 y la procesa",
+              rehechas == ["clase"] and procesadas == [["clase"]], f"{rehechas} {procesadas}")
+        check("lo que avise de madrugada no suena", _telegram.silencio is True)
+
+        rehechas.clear(), procesadas.clear()
+        ficha("otra", "2026-10-29T07:00:00")
+        nocturna.main(dt(2026, 10, 29, 7, 5))
+        check("si no alcanzo, a las 7:05 la procesa con el texto de turbo",
+              rehechas == [] and procesadas == [["clase", "otra"]], f"{rehechas} {procesadas}")
+    finally:
+        (finalizar_clase.procesar_pendientes_reconocidos, nocturna._rehacer, estado_vivo.iniciar,
+         estado_vivo.terminar, _telegram.silencio) = originales
+        usar_dir_pendientes(None)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def probar_respaldo_turbo_si_large_repite_la_pista():
+    print("\n[transcripcion] large-v3 que copia la pista inicial se rehace con turbo")
+    from orquestador import transcripcion as tr
+    pista = "Una pista de ejemplo para la prueba.\nSolo la voz de quien expone. Contexto académico formal."
+    largo = "mlx-community/whisper-large-v3-mlx"
+    llamados = []
+
+    def falso(salidas):
+        def transcribe(audio, language_profile, model_name, context_text):
+            llamados.append(model_name)
+            return salidas[model_name], "es", 0
+        return transcribe
+
+    bueno = {largo: "y pongan el nombre\n¿cierto?", tr.MODELO_RESPALDO: "otro"}
+    r = tr._transcribir_con_respaldo(falso(bueno), largo, pista, "a.wav", "es-chile", "")
+    check("sin la pista en el texto queda large-v3, en una sola pasada",
+          r[0] == "y pongan el nombre\n¿cierto?" and llamados == [largo], str(llamados))
+
+    llamados.clear()
+    copiado = {largo: "Contexto académico formal.\nContexto académico formal.\ny pongan el nombre",
+               tr.MODELO_RESPALDO: "¿Qué pasa? O sea, le queda la variable"}
+    r = tr._transcribir_con_respaldo(falso(copiado), largo, pista, "a.wav", "es-chile", "")
+    check("con la pista copiada se rehace con turbo y queda ese texto",
+          r[0].startswith("¿Qué pasa?") and llamados == [largo, tr.MODELO_RESPALDO], str(llamados))
+
+    check("una frase del profesor que contiene palabras de la pista no cuenta",
+          not tr._repite_la_pista("Aquí el contexto académico es formal, ¿cierto?", pista))
+    check("tampoco una muletilla corta", not tr._repite_la_pista("Solo.\n¿Ya?", pista))
+
+
 if __name__ == "__main__":
     # Todas las funciones probar_*, en el orden en que estan escritas. Antes era
     # una lista a mano, y una prueba que no se anotaba ahi no se ejecutaba nunca,

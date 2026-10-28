@@ -20,7 +20,7 @@ from pathlib import Path
 
 import anyio
 
-from . import bitacora, cancelacion, deteccion, estado_vivo, lock, notificaciones, pregunta_ramo
+from . import bitacora, cancelacion, deteccion, estado_vivo, lock, nocturna, notificaciones, pregunta_ramo
 from .config import cargar_config
 from .finalizar_clase import procesar_pendientes_reconocidos
 from .notificaciones import notificar_aviso, notificar_inicio
@@ -69,7 +69,9 @@ def main(avisar_si_espera: bool = False) -> None:
 
         # Lo que espera una respuesta por Telegram no se vuelve a preguntar ni se toca:
         # si no hay nada mas, no hay corrida (pregunta_ramo.py).
-        pendientes = [a for a in pendientes if not pregunta_ramo.esperando(a)]
+        # Tampoco lo que espera las 4:00 por audio dificil (nocturna.py).
+        en_espera = nocturna.audios_en_espera()
+        pendientes = [a for a in pendientes if not pregunta_ramo.esperando(a) and str(a) not in en_espera]
         if not pendientes:
             estado_vivo.limpiar()
             if avisar_si_espera:

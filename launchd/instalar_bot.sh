@@ -5,6 +5,9 @@
 #     dormido en una conexion abierta con Telegram.
 #   - la secretaria (orquestador.secretaria), todos los dias a las 9:00. Si
 #     no hay nada que decir, no escribe.
+#   - la transcripcion de madrugada (orquestador.nocturna), a las 4:00 y a las
+#     7:05. Rehace con large-v3 las clases de audio dificil, y a las 7:05 procesa
+#     con el texto de siempre las que no alcanzaron. Si no hay ninguna, no hace nada.
 #
 # Requisitos: el token del bot en el Llavero (servicio agente-estudio-telegram)
 # y el chat emparejado (python3 -m orquestador.bot --emparejar <id>).
@@ -14,6 +17,7 @@
 # Para quitarlos:
 #   launchctl bootout gui/$(id -u)/local.agente-estudio.bot
 #   launchctl bootout gui/$(id -u)/local.agente-estudio.secretaria
+#   launchctl bootout gui/$(id -u)/local.agente-estudio.nocturna
 set -e
 source "$(dirname "$0")/comun.sh"
 
@@ -65,6 +69,22 @@ escribir_plist local.agente-estudio.secretaria orquestador.secretaria "	<key>Sta
 		<integer>0</integer>
 	</dict>" secretaria.log
 
+escribir_plist local.agente-estudio.nocturna orquestador.nocturna "	<key>StartCalendarInterval</key>
+	<array>
+		<dict>
+			<key>Hour</key>
+			<integer>4</integer>
+			<key>Minute</key>
+			<integer>0</integer>
+		</dict>
+		<dict>
+			<key>Hour</key>
+			<integer>7</integer>
+			<key>Minute</key>
+			<integer>5</integer>
+		</dict>
+	</array>" nocturna.log
 
-echo "Listo. El bot quedo corriendo y la secretaria escribe a las 9:00 si hay algo."
-echo "Registros: $RAIZ/orquestador/logs/bot.log y secretaria.log"
+echo "Listo. El bot quedo corriendo, la secretaria escribe a las 9:00 si hay algo y"
+echo "las clases de audio dificil se transcriben de nuevo a las 4:00."
+echo "Registros: $RAIZ/orquestador/logs/bot.log, secretaria.log y nocturna.log"

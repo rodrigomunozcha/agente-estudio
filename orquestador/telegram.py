@@ -33,6 +33,8 @@ TIMEOUT_SEGUNDOS = 15
 BANDEJA = Path(__file__).parent / "logs" / "telegram_pendientes.jsonl"
 
 _token: str | None = None
+# Lo prende nocturna.py: lo que avise de madrugada no suena en el iPhone.
+silencio = False
 
 
 def token() -> str | None:
@@ -216,7 +218,7 @@ def avisar(texto: str, adjunto: Path | None = None, teclado: dict | None = None)
             lista.append(pendiente)
             return False
         try:
-            _mandar(texto, pendiente["adjunto"], teclado)
+            _mandar(texto, pendiente["adjunto"], teclado, silencioso=silencio)
             return True
         except Exception as e:
             if _sin_conexion(e):
