@@ -4543,35 +4543,6 @@ def probar_vigia_de_atascos() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def probar_respaldo_turbo_si_large_repite_la_pista():
-    print("\n[transcripcion] large-v3 que copia la pista inicial se rehace con turbo")
-    from orquestador import transcripcion as tr
-    pista = "Una pista de ejemplo para la prueba.\nSolo la voz de quien expone. Contexto académico formal."
-    llamados = []
-
-    def falso(salidas):
-        def transcribe(audio, language_profile, model_name, context_text):
-            llamados.append(model_name)
-            return salidas[model_name], "es", 0
-        return transcribe
-
-    bueno = {tr.MODELO_WHISPER: "y pongan el nombre\n¿cierto?", tr.MODELO_WHISPER_RESPALDO: "otro"}
-    r = tr._transcribir_con_respaldo(falso(bueno), pista, "a.wav", "es-chile", "")
-    check("sin la pista en el texto queda large-v3, en una sola pasada",
-          r[0] == "y pongan el nombre\n¿cierto?" and llamados == [tr.MODELO_WHISPER], str(llamados))
-
-    llamados.clear()
-    copiado = {tr.MODELO_WHISPER: "Contexto académico formal.\nContexto académico formal.\ny pongan el nombre",
-               tr.MODELO_WHISPER_RESPALDO: "¿Qué pasa? O sea, le queda la variable"}
-    r = tr._transcribir_con_respaldo(falso(copiado), pista, "a.wav", "es-chile", "")
-    check("con la pista copiada se rehace con turbo y queda ese texto",
-          r[0].startswith("¿Qué pasa?") and llamados == [tr.MODELO_WHISPER, tr.MODELO_WHISPER_RESPALDO], str(llamados))
-
-    check("una frase del profesor que contiene palabras de la pista no cuenta",
-          not tr._repite_la_pista("Aquí el contexto académico es formal, ¿cierto?", pista))
-    check("tampoco una muletilla corta", not tr._repite_la_pista("Solo.\n¿Ya?", pista))
-
-
 if __name__ == "__main__":
     # Todas las funciones probar_*, en el orden en que estan escritas. Antes era
     # una lista a mano, y una prueba que no se anotaba ahi no se ejecutaba nunca,

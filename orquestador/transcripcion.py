@@ -39,51 +39,13 @@ from .uso import registrar_transcripcion
 
 PERFIL_WHISPER_POR_DEFECTO = "es-chile"
 
-# large-v3 completo desde el 27-10-2026, en vez del turbo que trae Transcriptotem.
-# Comparados en 20 minutos de la clase del 09-10-2026, la de peor audio del
-# semestre: large-v3 armo frases con sentido donde turbo dejo ruido ("Esto no son
-# los betas" contra "hagamos un libro") y capto mas terminos de la clase. Ni
-# siquiera fue mas lento: 21,5 min contra 29,5 de turbo, que con audio malo
-# reintenta muchos tramos (una sola muestra, no es regla).
-#
-# Su defecto: en vez de los primeros 2 o 3 minutos escribio dos veces "Contexto
-# academico formal.", una frase de la pista inicial del perfil es-chile, y lo que
-# el profesor dijo ahi se perdio. Turbo no lo hizo. Por eso un tramo que repite la
-# pista se vuelve a transcribir entero con turbo (ver _transcribir_con_respaldo).
-MODELO_WHISPER = "mlx-community/whisper-large-v3-mlx"
-MODELO_WHISPER_RESPALDO = "mlx-community/whisper-large-v3-turbo"
-
 
 def _obtener_transcribe(transcriptotem_dir: str):
     ruta = str(Path(transcriptotem_dir))
     if ruta not in sys.path:
         sys.path.insert(0, ruta)
-    from backend.transcriber import _build_initial_prompt, transcribe
-
-    def transcribir(audio_path, language_profile, context_text=""):
-        return _transcribir_con_respaldo(transcribe, _build_initial_prompt(language_profile, context_text),
-                                         audio_path, language_profile, context_text)
-    return transcribir
-
-
-def _repite_la_pista(texto: str, pista: str) -> bool:
-    """Si alguna linea del texto es una frase de la pista inicial, tal cual. Un
-    profesor no dice "Contexto academico formal." como frase suelta: es Whisper
-    copiando la pista en vez de escuchar el audio."""
-    def normal(s: str) -> str:
-        return re.sub(r"[^\w ]", "", s).strip().lower()
-    frases = {normal(f) for f in re.split(r"[.\n]", pista) if len(normal(f)) > 10}
-    return any(normal(linea) in frases for linea in texto.splitlines())
-
-
-def _transcribir_con_respaldo(transcribe, pista: str, audio_path: str, perfil: str, contexto: str):
-    """Con large-v3, y con turbo si large-v3 repitio la pista. Si turbo tambien la
-    repite, queda el de turbo: el resto del texto sirve igual."""
-    resultado = transcribe(audio_path, language_profile=perfil, model_name=MODELO_WHISPER, context_text=contexto)
-    if _repite_la_pista(resultado[0], pista):
-        resultado = transcribe(audio_path, language_profile=perfil, model_name=MODELO_WHISPER_RESPALDO,
-                               context_text=contexto)
-    return resultado
+    from backend.transcriber import transcribe
+    return transcribe
 
 
 def transcribir_trabajo(trabajo: dict, config: dict) -> str:
@@ -103,8 +65,15 @@ def transcribir_trabajo(trabajo: dict, config: dict) -> str:
     #   - Nivelar el volumen del audio de sala del iPhone antes de Whisper
     #     (dynaudnorm o loudnorm): ganó en un tramo, perdió en otro y en dos de tres
     #     se comió entre 10% y 18% de las palabras.
-    # El modelo large-v3 completo se descartó primero por lento, y volvió el
-    # 27-10-2026 cuando se comparó con audio real (ver MODELO_WHISPER).
+    # El modelo large-v3 completo se probó dos veces y se descartó las dos. El
+    # 27-10-2026 (commit 73670c2, revertido) entendió bastante más que turbo en la
+    # clase de peor audio del semestre, pero una clase real de 98 minutos tardó 89
+    # en transcribirse, contra unos 19 con turbo, y ocupó la GPU que dibuja la
+    # pantalla: el Mac quedó casi inusable todo ese rato. Ojo si se vuelve a medir:
+    # esa primera prueba dio a large-v3 más rápido porque turbo corrió al mismo
+    # tiempo que otra transcripción del agente. Large-v3 además copiaba a veces la
+    # pista inicial en vez de escuchar ("Contexto académico formal." dos veces) y
+    # perdía esos minutos.
     contexto = trabajo.get("contexto") or ""
     archivos = trabajo["archivos"]
     partes = []
