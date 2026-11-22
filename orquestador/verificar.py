@@ -214,6 +214,52 @@ def _cli_de_claude() -> None:
         _anotar(FALLA, "el CLI de Claude Code no responde", f"{type(e).__name__}")
 
 
+async def _preguntar(modelo: str | None = None) -> tuple[bool, str]:
+    """Una llamada minima de verdad al modelo. Devuelve (respondio, detalle del error)."""
+    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage
+
+    from .skill_runner import consultar
+
+    opciones = ClaudeAgentOptions(
+        cwd=str(RAIZ), setting_sources=[], allowed_tools=[],
+        permission_mode="bypassPermissions",
+        cli_path=str(RAIZ / "node_modules" / ".bin" / "claude"), max_turns=1, model=modelo,
+    )
+    detalle = ""
+    try:
+        async for mensaje in consultar(prompt="Responde solo: ok", options=opciones):
+            if isinstance(mensaje, ResultMessage) and mensaje.is_error:
+                detalle = (getattr(mensaje, "result", None) or mensaje.subtype).strip()
+    except Exception as e:
+        if not detalle:
+            detalle = f"{type(e).__name__}: {e}"
+    return (not detalle), detalle
+
+
+def problema_de_sesion() -> str | None:
+    """
+    None si el modelo responde. Si no, el aviso para el estudiante, listo para
+    mostrar. Lo usa la secretaria cada manana: el 06-11-2026 la sesion caduco, una
+    reunion quedo trabada en el analisis y nadie se entero, porque esta revision
+    solo corria a mano. Cuesta una llamada minima al dia, dentro del plan.
+    """
+    import asyncio
+
+    try:
+        from .skill_runner import _es_sesion_caducada
+
+        viva, detalle = asyncio.run(_preguntar())
+    except Exception as e:
+        viva, detalle = False, f"{type(e).__name__}: {e}"
+    if viva:
+        return None
+    if _es_sesion_caducada(detalle):
+        return ("La sesión de Claude caducó, así que las clases y reuniones nuevas se van a "
+                "transcribir pero no se van a poder analizar. En la Terminal, en la carpeta del "
+                "proyecto, corre: node_modules/.bin/claude auth login")
+    return f"El modelo no responde, así que las clases nuevas no se van a poder analizar. Detalle: {detalle[:200]}"
+
+
 def _sesion_de_claude() -> None:
     """
     Comprueba que la sesion siga viva haciendo una llamada minima de verdad.
@@ -228,31 +274,15 @@ def _sesion_de_claude() -> None:
     # Sin este try, un paquete faltante tiraba un traceback y cortaba la revision
     # a la mitad, sin llegar al resumen ni a las comprobaciones que siguen.
     try:
-        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage
+        import claude_agent_sdk  # noqa: F401
 
-        from .skill_runner import _es_sesion_caducada, consultar
+        from .skill_runner import _es_sesion_caducada
     except ImportError as e:
         _anotar(FALLA, "no se pudo comprobar la sesion de Claude", f"no carga {e.name}")
         return
 
-    async def preguntar(modelo: str | None = None) -> tuple[bool, str]:
-        opciones = ClaudeAgentOptions(
-            cwd=str(RAIZ), setting_sources=[], allowed_tools=[],
-            permission_mode="bypassPermissions",
-            cli_path=str(RAIZ / "node_modules" / ".bin" / "claude"), max_turns=1, model=modelo,
-        )
-        detalle = ""
-        try:
-            async for mensaje in consultar(prompt="Responde solo: ok", options=opciones):
-                if isinstance(mensaje, ResultMessage) and mensaje.is_error:
-                    detalle = (getattr(mensaje, "result", None) or mensaje.subtype).strip()
-        except Exception as e:
-            if not detalle:
-                detalle = f"{type(e).__name__}: {e}"
-        return (not detalle), detalle
-
     try:
-        viva, detalle = asyncio.run(preguntar())
+        viva, detalle = asyncio.run(_preguntar())
     except Exception as e:
         _anotar(FALLA, "no se pudo comprobar la sesion de Claude", f"{type(e).__name__}")
         return
@@ -261,7 +291,7 @@ def _sesion_de_claude() -> None:
         _anotar(OK, "sesion de Claude Code", "activa, el modelo responde")
     elif _es_sesion_caducada(detalle):
         _anotar(FALLA, "la sesion de Claude Code caduco",
-                "inicia sesion de nuevo con: node_modules/.bin/claude")
+                "inicia sesion de nuevo con: node_modules/.bin/claude auth login")
         return
     else:
         _anotar(FALLA, "el modelo no responde", detalle[:80])
@@ -276,7 +306,7 @@ def _sesion_de_claude() -> None:
 
     for uso, modelo in (("el bot", MODELO_BOT), ("las reuniones", MODELO_REUNIONES)):
         try:
-            responde, detalle = asyncio.run(preguntar(modelo))
+            responde, detalle = asyncio.run(_preguntar(modelo))
         except Exception as e:
             responde, detalle = False, type(e).__name__
         if responde:

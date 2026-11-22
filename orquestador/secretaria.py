@@ -9,7 +9,8 @@ diario vacio se aprende a ignorar. Lo decidio el estudiante el 29-09-2026, y
 pidio explicitamente que no diga que clase hay hoy, porque eso ya lo sabe.
 
 Todo sale de evaluaciones.json, sin llamar al modelo: son fechas y listas, y
-Python no se equivoca ni cobra por leerlas. Lo lanza un LaunchAgent a las 9:00
+Python no se equivoca ni cobra por leerlas. La unica llamada es la minima de
+verificar.problema_de_sesion, que comprueba que la sesion de Claude siga viva. Lo lanza un LaunchAgent a las 9:00
 (ver launchd/instalar_bot.sh). El bot usa las mismas funciones para /hoy y
 /evaluaciones.
 """
@@ -17,10 +18,11 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import evaluaciones, pregunta_ramo, telegram
+from . import evaluaciones, pregunta_ramo, telegram, verificar
 from .carpetas import resolver_carpeta_ramo
 from .config import cargar_config
 from .hoja_evaluacion import NOMBRES, clases_del_ramo, nombre_archivo, ramo_legible
+from .notificaciones import notificar_aviso
 
 DIAS_ADELANTE = 7
 
@@ -201,6 +203,12 @@ def main() -> None:
     # Las grabaciones que siguen esperando de que son se recuerdan una vez, aqui: es lo
     # unico que corre todos los dias aunque no llegue nada nuevo.
     pregunta_ramo.recordar()
+    # Por la misma razon, aqui se comprueba que la sesion de Claude siga viva. Al final,
+    # porque tarda unos segundos y lo de arriba no la necesita. El aviso va tambien al
+    # Mac: el dia que caduco, Telegram tambien estaba fallando (06-11-2026).
+    problema = verificar.problema_de_sesion()
+    if problema:
+        notificar_aviso("La conexión con Claude no funciona", problema)
 
 
 if __name__ == "__main__":
