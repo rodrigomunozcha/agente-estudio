@@ -46,7 +46,7 @@ Por eso, si tocas esa configuración:
   algo: si la línea RESULTADO_ORQUESTADOR viene con el JSON roto, se retoma la sesión de
   la primera, sin herramientas y en un turno, para que la repita (16-10-2026). Rehacer la
   clase costaba unos 12 turnos. Las reuniones no pasan por estas cuatro: tienen su
-  análisis y su revisor aparte (`reuniones.py`).
+  análisis, su revisor y su hoja aparte (`reuniones.py`), tres llamadas.
 - **`max_turns` es un seguro contra corridas descontroladas**, no un objetivo. Cada
   llamada tiene el suyo en una constante `MAX_TURNS...` de su módulo, según el trabajo que
   hace. Si una etapa se pasa de su tope, algo se salió de lo esperado y cortar es lo

@@ -38,12 +38,13 @@ exactamente `===REUNION_FIN===`. Nada antes ni después. Con esta forma:
   "titulo": "Tema de la conversación, corto y concreto",
   "una_linea": "Qué fue, en una línea que se lea caminando: con quién y para qué",
   "tipo": "reunion o entrevista",
+  "practica": true,
   "resumen": "De qué se habló, en cuatro a ocho líneas",
   "decisiones": ["Lo que se decidió, una por línea"],
   "acciones": [
     {
       "que": "Qué hay que hacer",
-      "quien": "Quién lo hace: el estudiante, una persona por su nombre o su rol",
+      "quien": "Quién lo hace: si le toca al estudiante, escribe exactamente 'el estudiante'. Si no, la persona por su nombre o su rol",
       "cuando": "Como se dijo, o cadena vacía",
       "fecha": "AAAA-MM-DD o null",
       "hora": "HH:MM o null",
@@ -78,6 +79,13 @@ exactamente `===REUNION_FIN===`. Nada antes ni después. Con esta forma:
       "por_que": "Para qué le sirve al estudiante",
       "explicacion": "La explicación lista para estudiar, desde cero, en un párrafo o dos",
       "fuentes": ["La URL que usaste, o 'conocimiento general' si no buscaste"]
+    }
+  ],
+  "mapa_empresa": [
+    {
+      "nombre": "La sigla, el término interno, el área, el proceso, la herramienta o la persona",
+      "tipo": "sigla, término, área, proceso, herramienta, persona o cliente",
+      "que_es": "Qué es y para qué sirve en el día a día, en una o dos frases, como se lo explicarías a alguien que llegó esta semana"
     }
   ]
 }
@@ -121,6 +129,33 @@ guarda si dice que sí.
   nombres de personas privadas. El nombre queda en la nota de la reunión, que sí lo admite.
 - Nunca correos, teléfonos, RUT, direcciones ni datos bancarios.
 - Una reunión de grupo de estudio no tiene organización: la lista va vacía.
+
+## Si es de la práctica
+
+`practica` va sin comillas: `true` o `false`.
+
+El estudiante está haciendo su práctica profesional y graba sus reuniones de trabajo para
+aprender rápido cómo funciona la empresa. Toda reunión es de la práctica (`practica: true`),
+salvo que el nombre de la grabación o la conversación digan otra cosa: una entrevista de
+trabajo, un grupo de estudio, una conversación con un profesor u otro trabajo.
+
+## El mapa de la empresa
+
+Solo si `practica` es true. Si no, la lista va vacía.
+
+El estudiante recién llega y no conoce el vocabulario de la empresa. En `mapa_empresa` va
+cada cosa que se nombró en la reunión y que alguien nuevo necesita entender para seguir
+las conversaciones: siglas, términos internos, áreas y lo que hacen, procesos,
+herramientas y sistemas, clientes o socios, y personas con su rol.
+
+- El prompt trae lo que el mapa ya sabe. No repitas lo que ya está bien explicado. Sí
+  incluye una entrada que ya existe si esta reunión la explica mejor o la corrige: tu
+  `que_es` reemplaza al anterior, así que escríbelo completo.
+- Explica con lo que se dijo. Si la reunión solo nombró algo sin explicarlo, di lo que se
+  puede saber por el contexto y termina con "(por confirmar)". No lo completes con lo que
+  supones de empresas parecidas.
+- Las personas van con su nombre, si se escuchó, y su rol. Nunca correos, teléfonos ni RUT.
+- Una sigla que no se entendió bien en el audio va con "(dudoso por audio)".
 
 ## Lo que hay que investigar
 

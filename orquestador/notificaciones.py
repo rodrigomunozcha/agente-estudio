@@ -169,10 +169,11 @@ def notificar_hoja_evaluacion(ramo: str, evaluacion: str, n_clases: int, ruta: P
                     f"📚 Junta {n_clases} clase{'s' if n_clases != 1 else ''}\n📎 Te la adjunto aquí", ruta)
 
 
-def notificar_reunion(titulo: str, cuerpo: str, ruta_docx: Path) -> None:
+def notificar_reunion(titulo: str, cuerpo: str, ruta_hoja: Path) -> None:
     _notificar(titulo="Reunión procesada", subtitulo=titulo, mensaje="El resumen y las acciones "
-               "quedaron en Obsidian y en el .docx.", url_al_hacer_clic=_file_url(ruta_docx))
-    telegram.avisar(f"🤝 Reunión procesada\n📌 {titulo}\n\n{cuerpo}\n\n📎 El .docx va adjunto", ruta_docx)
+               "quedaron en Obsidian y en la hoja.", url_al_hacer_clic=_file_url(ruta_hoja))
+    telegram.avisar(f"🤝 Reunión procesada\n📌 {titulo}\n\n{cuerpo}\n\n📎 La hoja va adjunta: ábrela en el navegador",
+                    ruta_hoja)
 
 
 def notificar_evento(que: str, cuando: str, url: str, lugar: str = "") -> None:

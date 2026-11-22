@@ -191,13 +191,17 @@ def probar_el_nombre_del_archivo_manda_sobre_el_dia() -> None:
     # horario. No puede caer al dia de la semana.
     pregunta = [
         "Evaluación conocimientos intermedios 26.08.26.m4a",
-        "Reunión de coordinación 30.08.m4a",
         "Conversación con el ayudante.m4a",
     ]
     for nombre in pregunta:
         estado, info = rpn.resolver([nombre], config)
         check(f"'{nombre[:34]}' -> pregunta",
               estado == rpn.NO_CALZA and info is None, f"dio {estado} / {info}")
+    # Si el nombre dice que es una reunion, tampoco cae al dia: es reunion, sin
+    # preguntar. Hasta el 06-11-2026 este caso preguntaba.
+    estado, info = rpn.resolver(["Reunión de coordinación 30.08.m4a"], config)
+    check("'Reunión de coordinación 30.08' -> reunion",
+          estado == rpn.RECONOCIDO and info["nombre"] == rpn.RAMO_REUNION, f"dio {estado} / {info}")
 
     # Un nombre sin contenido no es evidencia de nada: ahi si manda el dia.
     for nombre in ["Nota de voz 3.m4a", "Grabación 12.m4a", "audio.m4a", "Clase.m4a"]:
@@ -1966,13 +1970,144 @@ def probar_hoja_degrada_sin_mentir() -> None:
           and "extraer_preguntas_respuestas" not in fuente)
 
 
-def probar_reunion_audio_txt_y_docx_con_el_mismo_nombre() -> None:
+async def _hoja_de_reunion_falsa(texto, datos, fecha, slug):
+    """En vez de la llamada al modelo que redacta la hoja de una reunion."""
+    return ('<section class="bloque"><div class="t con"><h3>Lo que quiso transmitir</h3>'
+            "<p>Una explicación de prueba.</p></div></section>"), None
+
+
+def probar_reunion_de_la_practica_y_su_mapa() -> None:
     """
-    El audio, el .txt y el .docx de una reunion se llaman igual, empezando por
+    Una reunion de la practica va a rutas.reuniones_practica y suma al mapa de la
+    empresa. Una entrada que vuelve reemplaza su explicacion y cuenta la reunion
+    nueva. Un dato de contacto no entra. Una reunion que no es de la practica va a
+    la otra carpeta y no toca el mapa (pedido del estudiante, 05-11-2026).
+    """
+    print("\n== reuniones de la practica y el mapa de la empresa ==")
+    from orquestador import reuniones as rn
+
+    base = Path(tempfile.mkdtemp(prefix="reunion_practica_"))
+    config = {"rutas": {"vault_obsidian": str(base / "vault"), "output": str(base / "Output"),
+                        "procesados": str(base / "Procesados"), "reuniones_practica": str(base / "Practica")}}
+    originales = (rn.notificar_reunion, rn.CARPETA_OTRAS, rn.evaluaciones.RUTA)
+    rn.notificar_reunion = lambda *a, **k: None
+    rn.CARPETA_OTRAS, rn.evaluaciones.RUTA = base / "Otras", base / "evaluaciones.json"
+    rn.evaluaciones.guardar({"ramos": {}, "pendientes": []})
+
+    def analisis(titulo, practica, mapa):
+        return {"titulo": titulo, "tipo": "reunion", "practica": practica, "resumen": "Hablamos.",
+                "decisiones": [], "acciones": [], "seguimientos": [], "preguntas_abiertas": [],
+                "entrevista": None, "investigar": [], "memoria": [], "mapa_empresa": mapa}
+
+    try:
+        _, hoja = rn.guardar(analisis("Agenda del área", True, [
+            {"nombre": "OM", "tipo": "sigla", "que_es": "Algo que solo se nombró (por confirmar)"},
+            {"nombre": "Nombre Apellido", "tipo": "persona", "que_es": "Jefa del área, alguien@example.com"}]),
+            "2026-11-05", "Reu agenda.m4a", config, "texto", "<p>cuerpo</p>", None)
+        check("la reunion de la practica queda en su carpeta, con la fecha al reves",
+              hoja.parent.parent == base / "Practica" and hoja.parent.name.startswith("2026-11-05"), str(hoja))
+        mapa = rn.leer_mapa(base / "Practica")
+        check("el mapa guarda la sigla y deja fuera la entrada con un correo",
+              [m["nombre"] for m in mapa] == ["OM"], str(mapa))
+        check("y la hoja del mapa queda en la raiz de la carpeta",
+              "OM" in (base / "Practica" / f"{rn.NOMBRE_MAPA}.html").read_text(encoding="utf-8"))
+        rn.guardar(analisis("Seguimiento semanal", True, [
+            {"nombre": "om", "tipo": "sigla", "que_es": "La explicación completa"}]),
+            "2026-11-12", "Reu semanal.m4a", config, "texto", "<p>cuerpo</p>", None)
+        mapa = rn.leer_mapa(base / "Practica")
+        check("una entrada que vuelve reemplaza su explicacion y suma la reunion",
+              len(mapa) == 1 and mapa[0]["que_es"] == "La explicación completa"
+              and len(mapa[0]["reuniones"]) == 2, str(mapa))
+        _, otra = rn.guardar(analisis("Grupo de estudio", False, [
+            {"nombre": "Algo", "tipo": "término", "que_es": "No va al mapa"}]),
+            "2026-11-06", "Grupo.m4a", config, "texto", "<p>cuerpo</p>", None)
+        check("una reunion que no es de la practica va a la otra carpeta y no toca el mapa",
+              otra.parent.parent == base / "Otras" and len(rn.leer_mapa(base / "Practica")) == 1, str(otra))
+    finally:
+        rn.notificar_reunion, rn.CARPETA_OTRAS, rn.evaluaciones.RUTA = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_hallazgos_de_la_revision_de_reuniones() -> None:
+    """
+    Lo que encontro la revision independiente del 05-11-2026: un mapa ilegible no se
+    pisa, "false" como texto no cuenta como practica, un monto no se confunde con un
+    telefono, el contador no cuenta lo que no cambio, las tareas del estudiante van
+    aparte, y rehacer redacta la hoja de nuevo en vez de reusar la guardada.
+    """
+    print("\n== hallazgos de la revision de reuniones ==")
+    import asyncio
+    import json
+
+    from orquestador import reuniones as rn
+
+    base = Path(tempfile.mkdtemp(prefix="reunion_revision_"))
+    avisos = []
+    originales = (rn.notificar_aviso, rn.redactar_hoja)
+    rn.notificar_aviso = lambda titulo, mensaje: avisos.append(titulo)
+    try:
+        roto = base / "roto"
+        roto.mkdir()
+        (roto / rn.DATOS_MAPA).write_text("{esto no es json", encoding="utf-8")
+        datos = {"titulo": "X", "mapa_empresa": [{"nombre": "OM", "tipo": "sigla", "que_es": "Algo"}]}
+        check("un mapa que no se puede leer no se pisa, y se avisa",
+              rn.actualizar_mapa(datos, "2026-11-05", roto) == 0
+              and (roto / rn.DATOS_MAPA).read_text(encoding="utf-8") == "{esto no es json" and avisos, str(avisos))
+
+        texto = f"{rn.MARCA_INICIO}\n" + json.dumps({"titulo": "T", "resumen": "R", "practica": "false"}) + f"\n{rn.MARCA_FIN}"
+        check("\"false\" como texto no cuenta como practica", rn.extraer(texto)["practica"] is False)
+
+        limpio = base / "limpio"
+        monto = {"titulo": "X", "mapa_empresa": [
+            {"nombre": "Meta anual", "tipo": "término", "que_es": "Vender 10.000.000 en el periodo 2025-2026"},
+            {"nombre": "Contacto", "tipo": "persona", "que_es": "Su celular es 900000000"}]}
+        check("un monto o un periodo entran al mapa, un celular no",
+              rn.actualizar_mapa(monto, "2026-11-05", limpio) == 1
+              and [m["nombre"] for m in rn.leer_mapa(limpio)] == ["Meta anual"], str(rn.leer_mapa(limpio)))
+        check("la misma entrada sin cambios no se cuenta otra vez",
+              rn.actualizar_mapa(monto, "2026-11-05", limpio) == 0)
+
+        tarjeta = rn.tarjeta_acciones({"acciones": [
+            {"que": "Armar la planilla", "quien": "el estudiante", "respaldada": True},
+            {"que": "Revisar el contrato", "quien": "Nombre Apellido", "respaldada": True}], "seguimientos": []})
+        check("las tareas del estudiante van aparte de las de otros",
+              tarjeta.index("Lo que tienes que hacer tú") < tarjeta.index("Armar la planilla")
+              < tarjeta.index("Lo que quedó en manos de otros") < tarjeta.index("Revisar el contrato"), tarjeta)
+
+        pend = base / "pendientes"
+        pend.mkdir()
+        (pend / "s1.txt").write_text("lo que se dijo", encoding="utf-8")
+        (pend / "s1.json").write_text(json.dumps({"slug": "s1", "fecha": "2026-11-05", "ramo": rn.RAMO,
+                                                  "archivos_originales": ["Reu.m4a"],
+                                                  "archivo_texto": str(pend / "s1.txt")}), encoding="utf-8")
+        (pend / "s1_reunion.json").write_text(json.dumps({
+            "titulo": "Agenda", "tipo": "reunion", "practica": True, "resumen": "Hablamos.", "decisiones": [],
+            "acciones": [], "seguimientos": [], "preguntas_abiertas": [], "entrevista": None,
+            "investigar": [], "mapa_empresa": []}), encoding="utf-8")
+        (pend / "s1_reunion_hoja.html").write_text("<p>HOJA VIEJA</p>", encoding="utf-8")
+        rn.redactar_hoja = _hoja_de_reunion_falsa
+        usar_dir_pendientes(pend)
+        config = {"rutas": {"output": str(base / "Output"), "reuniones_practica": str(base / "Practica"),
+                            "vault_obsidian": str(base / "vault")}}
+        hoja, _, motivo = asyncio.run(rn.rehacer("s1", config))
+        contenido = hoja.read_text(encoding="utf-8")
+        check("rehacer redacta la hoja de nuevo y la deja en la carpeta de la practica",
+              "Lo que quiso transmitir" in contenido and "HOJA VIEJA" not in contenido
+              and hoja.parent.parent == base / "Practica" and motivo is None, str(hoja))
+    finally:
+        rn.notificar_aviso, rn.redactar_hoja = originales
+        usar_dir_pendientes(None)
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_reunion_audio_txt_y_hoja_con_el_mismo_nombre() -> None:
+    """
+    El audio, el .txt y la hoja de una reunion se llaman igual, empezando por
     la fecha (pedido del estudiante, 09-10-2026). La nota de Obsidian conserva
-    su nombre, porque renombrar notas rompe enlaces.
+    su nombre, porque renombrar notas rompe enlaces. La hoja reemplazo al .docx
+    el 05-11-2026.
     """
-    print("\n== una reunion deja audio, .txt y .docx con el mismo nombre ==")
+    print("\n== una reunion deja audio, .txt y hoja con el mismo nombre ==")
     import asyncio
     import json
 
@@ -1991,30 +2126,31 @@ def probar_reunion_audio_txt_y_docx_con_el_mismo_nombre() -> None:
         "entrevista": None, "investigar": []}, ensure_ascii=False), encoding="utf-8")
     config = {"rutas": {"output": str(base / "Output"), "procesados": str(base / "Procesados"),
                         "vault_obsidian": str(base / "vault")}, ensayo.CLAVE: True}
-    original = rn.notificar_reunion
+    original = (rn.notificar_reunion, rn.redactar_hoja)
     rn.notificar_reunion = lambda *a, **k: None
+    rn.redactar_hoja = _hoja_de_reunion_falsa
     usar_dir_pendientes(pendientes)
     try:
-        docx = asyncio.run(rn.procesar_reunion(
+        hoja = asyncio.run(rn.procesar_reunion(
             {"slug": "s1", "fecha": "2026-10-07", "ramo": rn.RAMO,
              "archivos_originales": [str(audio)], "archivo_texto": str(texto)}, config))
         esperado = "07.10.26 - Café con un profe - Reunión"
         archivados = sorted(p.name for p in (base / "Procesados" / rn.RAMO).iterdir())
         check("el audio y el .txt quedan con el nombre nuevo",
               archivados == [f"{esperado}.m4a", f"{esperado}.txt"], str(archivados))
-        check("y el .docx tambien", docx.name == f"{esperado}.docx", docx.name)
+        check("y la hoja tambien", hoja.name == f"{esperado}.html", hoja.name)
         check("la nota de Obsidian conserva su formato",
               [p.name for p in (base / "vault").rglob("*.md")] == ["Reunión - 2026-10-07 - Café con un profe.md"],
               str(list((base / "vault").rglob("*.md"))))
     finally:
-        rn.notificar_reunion = original
+        rn.notificar_reunion, rn.redactar_hoja = original
         usar_dir_pendientes(None)
         shutil.rmtree(base, ignore_errors=True)
 
 
 def probar_reunion_en_un_solo_lugar() -> None:
     """
-    Fuera de un ensayo, una reunion deja la grabacion, la transcripcion y el .docx
+    Fuera de un ensayo, una reunion deja la grabacion, la transcripcion y la hoja
     juntos en la carpeta de reuniones, con el mismo nombre. La grabacion se mueve y la
     transcripcion se copia. Carpetas temporales y el analisis guardado de antemano.
     """
@@ -2038,24 +2174,27 @@ def probar_reunion_en_un_solo_lugar() -> None:
         "entrevista": None, "investigar": []}, ensure_ascii=False), encoding="utf-8")
     config = {"rutas": {"output": str(base / "Output"), "procesados": str(base / "Procesados"),
                         "vault_obsidian": str(base / "vault")}}
-    originales = (rn.notificar_reunion, rn.CARPETA_DOCX, rn.evaluaciones.RUTA)
+    originales = (rn.notificar_reunion, rn.CARPETA_OTRAS, rn.evaluaciones.RUTA, rn.redactar_hoja)
     rn.notificar_reunion = lambda *a, **k: None
-    rn.CARPETA_DOCX, rn.evaluaciones.RUTA = base / "Reuniones post Claude", base / "evaluaciones.json"
+    rn.redactar_hoja = _hoja_de_reunion_falsa
+    rn.CARPETA_OTRAS, rn.evaluaciones.RUTA = base / "Reuniones post Claude", base / "evaluaciones.json"
     rn.evaluaciones.guardar({"ramos": {}, "pendientes": []})
     usar_dir_pendientes(pendientes)
     try:
-        docx = asyncio.run(rn.procesar_reunion(
+        hoja = asyncio.run(rn.procesar_reunion(
             {"slug": "s1", "fecha": "2026-10-07", "ramo": rn.RAMO,
              "archivos_originales": [str(audio)], "archivo_texto": str(texto)}, config))
         esperado = "07.10.26 - Café con un profe - Reunión"
-        juntos = sorted(p.name for p in docx.parent.iterdir())
-        check("grabación, transcripción y .docx quedan juntos, con el mismo nombre",
-              juntos == [f"{esperado}.docx", f"{esperado}.m4a", f"{esperado}.txt"], str(juntos))
+        juntos = sorted(p.name for p in hoja.parent.iterdir())
+        check("grabación, transcripción y hoja quedan juntas, con el mismo nombre",
+              juntos == [f"{esperado}.html", f"{esperado}.m4a", f"{esperado}.txt"], str(juntos))
+        check("la hoja trae la explicación que redactó el modelo",
+              "Lo que quiso transmitir" in hoja.read_text(encoding="utf-8"))
         sala = sorted(p.name for p in (base / "Procesados" / rn.RAMO).iterdir())
         check("la grabación no queda dos veces: en la sala de trabajo solo la transcripción",
               sala == [f"{esperado}.txt"], str(sala))
     finally:
-        rn.notificar_reunion, rn.CARPETA_DOCX, rn.evaluaciones.RUTA = originales
+        rn.notificar_reunion, rn.CARPETA_OTRAS, rn.evaluaciones.RUTA, rn.redactar_hoja = originales
         usar_dir_pendientes(None)
         shutil.rmtree(base, ignore_errors=True)
 
@@ -2902,7 +3041,7 @@ def probar_bot_de_telegram() -> None:
               "carpetas_ramo": {ramo: str(vault)},
               "carpetas_onedrive": {ramo: str(semestre / "Ramo de prueba")},
               "ramos": {"lunes": {"nombre": ramo, "inicio": "08:30", "fin": "10:00", "sala": "A-101"}}}
-    datos = {"ramos": {ramo: [{"nombre": "S2", "fecha": "2026-11-09", "tipo": "prueba",
+    datos = {"ramos": {ramo: [{"nombre": "S2", "fecha": "2036-11-09", "tipo": "prueba",
                                "fuente": "clase", "clase": "2026-09-28",
                                "textual": "la solemne dos es el nueve"}]},
              "clases_perdidas": [], "pendientes": []}
@@ -2987,12 +3126,12 @@ def probar_bot_de_telegram() -> None:
               and "Anotado" in enviados[-1][0], str(enviados[-1]))
 
         respuesta["texto"] = ("Ok.\nACCION: {\"tipo\": \"fecha_evaluacion\", \"ramo\": \"" + ramo
-                              + "\", \"evaluacion\": \"S2\", \"fecha\": \"2026-11-16\"}")
+                              + "\", \"evaluacion\": \"S2\", \"fecha\": \"2036-11-16\"}")
         b.atender(mensaje("la S2 se movió al 16"), 1)
         check("si el profesor dijo otra cosa en clase, lo advierte antes de anotar",
               "Ojo: en la clase del" in enviados[-1][0], enviados[-1][0])
         b.atender(boton("no"), 1)
-        check("y con No no toca nada", ev.cargar()["ramos"][ramo][0]["fecha"] == "2026-11-09")
+        check("y con No no toca nada", ev.cargar()["ramos"][ramo][0]["fecha"] == "2036-11-09")
 
         respuesta["texto"] = "Ok.\nACCION: {\"tipo\": \"clase_perdida\", \"ramo\": \"OTRO\", \"fecha\": \"2026-10-05\"}"
         b.atender(mensaje("falté a otro ramo"), 1)
@@ -3296,14 +3435,12 @@ def probar_revision_de_reuniones() -> None:
 def probar_reuniones() -> None:
     """
     Una grabacion marcada como REUNIÓN no pasa por la skill de clases: deja una
-    nota en Reuniones/, un .docx sin pisar otro, y sus acciones con fecha futura
+    nota en Reuniones/, una hoja sin pisar otra, y sus acciones con fecha futura
     quedan para la secretaria. Modelo, boveda, OneDrive y avisos son falsos.
     """
     print("\n== reuniones ==")
     import asyncio
     import json as _json
-
-    from docx import Document
 
     from orquestador import evaluaciones as ev
     from orquestador import finalizar_clase as fc
@@ -3348,13 +3485,13 @@ def probar_reuniones() -> None:
     config = {"rutas": {"vault_obsidian": str(base / "vault"), "output": str(base / "Output"),
                         "procesados": str(base / "Procesados")}}
     avisos = []
-    originales = (re_.CARPETA_DOCX, re_.notificar_reunion, ev.RUTA)
-    re_.CARPETA_DOCX, ev.RUTA = base / "OneDrive", base / "evaluaciones.json"
-    re_.notificar_reunion = lambda titulo, texto, docx: avisos.append((titulo, texto, docx))
+    originales = (re_.CARPETA_OTRAS, re_.notificar_reunion, ev.RUTA)
+    re_.CARPETA_OTRAS, ev.RUTA = base / "OneDrive", base / "evaluaciones.json"
+    re_.notificar_reunion = lambda titulo, texto, hoja: avisos.append((titulo, texto, hoja))
     ev.guardar({"ramos": {}, "pendientes": []})
     try:
         datos = re_.extraer(texto)
-        nota, docx = re_.guardar(datos, "2026-09-29", "Entrevista grupal.m4a", config, transcripcion)
+        nota, hoja = re_.guardar(datos, "2026-09-29", "Entrevista grupal.m4a", config, transcripcion)
         md = nota.read_text(encoding="utf-8")
         check("deja la nota en Reuniones/ de la boveda, con el nombre de la persona",
               nota.parent.name == "Reuniones" and nota.name.startswith("Reunión - 2026-09-29")
@@ -3362,10 +3499,15 @@ def probar_reuniones() -> None:
         check("la nota trae acciones, la entrevista y lo que hay que investigar",
               all(s in md for s in ("## Acciones", "## La entrevista", "Sugerencia para mejorarla",
                                     "## Para investigar: Empresa Ejemplo")))
-        doc = Document(docx)
-        check("y un .docx en su propia carpeta de OneDrive, con su mismo nombre",
-              docx.parent.parent == base / "OneDrive" and docx.parent.name.startswith("2026-")
-              and doc.paragraphs[0].text == analisis["titulo"], str(docx))
+        html_hoja = hoja.read_text(encoding="utf-8")
+        check("y una hoja en su propia carpeta de OneDrive: una entrevista no es de la practica",
+              hoja.parent.parent == base / "OneDrive" and hoja.parent.name.startswith("2026-")
+              and analisis["titulo"] in html_hoja, str(hoja))
+        check("la hoja trae arriba las tareas con su cita, y la promesa sin cita no",
+              "Lo que hay que hacer" in html_hoja and "mándame tu cv corregido el lunes" in html_hoja
+              and "Mandar el contrato" not in html_hoja)
+        check("sin la explicación del modelo, la hoja lo dice y trae el resumen",
+              "Falta la explicación de la reunión" in html_hoja and analisis["resumen"] in html_hoja)
         pendientes = ev.cargar()["pendientes"]
         acciones = [p for p in pendientes if p.get("tipo") != "seguimiento"]
         check("solo la accion con fecha futura y cita en la grabacion queda para la secretaria",
@@ -3377,15 +3519,15 @@ def probar_reuniones() -> None:
               == [("2026-10-06", "Avisar si pasa a la segunda etapa (la empresa)")], str(seguimientos))
         check("la accion sin cita en la grabacion queda en la nota marcada para verificar",
               "Llamar al gerente" in md and "verifícala" in md)
-        _, docx2 = re_.guardar(re_.extraer(texto), "2026-09-29", "Entrevista grupal.m4a", config, transcripcion)
-        check("repetirla no pisa el .docx ni duplica los pendientes",
-              docx2.name.endswith("(2).docx") and len(ev.cargar()["pendientes"]) == 2, docx2.name)
+        _, hoja2 = re_.guardar(re_.extraer(texto), "2026-09-29", "Entrevista grupal.m4a", config, transcripcion)
+        check("repetirla no pisa la hoja ni duplica los pendientes",
+              hoja2.name.endswith("(2).html") and len(ev.cargar()["pendientes"]) == 2, hoja2.name)
         aviso = avisos[0][1]
         check("avisa con una linea de que fue, las acciones con fecha y los seguimientos",
               aviso.startswith("📝 Entrevista grupal de práctica en Empresa Ejemplo")
               and "Mandar el CV corregido - el estudiante, 05-10" in aviso
               and "⏳ Seguimientos\n• Avisar si pasa a la segunda etapa - la empresa, 06-10" in aviso
-              and avisos[0][2] == docx, aviso)
+              and avisos[0][2] == hoja, aviso)
         check("sin afirmar lo que no tiene cita ni repetir el resumen largo",
               "Llamar al gerente" not in aviso and "Mandar el contrato" not in aviso
               and analisis["resumen"] not in aviso, aviso)
@@ -3419,7 +3561,7 @@ def probar_reuniones() -> None:
         check("una grabacion marcada REUNIÓN va al analisis de reuniones, no a la skill de clases",
               llamadas == [re_.RAMO], str(llamadas))
     finally:
-        re_.CARPETA_DOCX, re_.notificar_reunion, ev.RUTA = originales
+        re_.CARPETA_OTRAS, re_.notificar_reunion, ev.RUTA = originales
         shutil.rmtree(base, ignore_errors=True)
 
 
@@ -3615,9 +3757,9 @@ def probar_reunion_ofrece_memoria() -> None:
     config = {"rutas": {"vault_obsidian": str(base / "vault"), "output": str(base / "Output")}}
     ofertas, enviados, cambios = [], [], []
     tg = b.telegram
-    originales = (re_.CARPETA_DOCX, re_.CARPETA_PROPUESTAS, re_.notificar_reunion, re_.notificar_memoria,
+    originales = (re_.CARPETA_OTRAS, re_.CARPETA_PROPUESTAS, re_.notificar_reunion, re_.notificar_memoria,
                   ev.RUTA, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.RUTA_ESTADO, b.cargar_config)
-    re_.CARPETA_DOCX, re_.CARPETA_PROPUESTAS = base / "OneDrive", base / "propuestas"
+    re_.CARPETA_OTRAS, re_.CARPETA_PROPUESTAS = base / "OneDrive", base / "propuestas"
     re_.notificar_reunion = lambda *a: None
     re_.notificar_memoria = lambda r, clave: ofertas.append((r, clave))
     ev.RUTA, b.RUTA_ESTADO, b.cargar_config = base / "evaluaciones.json", base / "estado.json", (lambda: config)
@@ -3667,7 +3809,7 @@ def probar_reunion_ofrece_memoria() -> None:
                     "transcripción")
         check("en un ensayo no se ofrece nada", ofertas == [])
     finally:
-        (re_.CARPETA_DOCX, re_.CARPETA_PROPUESTAS, re_.notificar_reunion, re_.notificar_memoria,
+        (re_.CARPETA_OTRAS, re_.CARPETA_PROPUESTAS, re_.notificar_reunion, re_.notificar_memoria,
          ev.RUTA, tg.enviar, tg.responder_boton, tg.cambiar_botones, b.RUTA_ESTADO, b.cargar_config) = originales
         shutil.rmtree(base, ignore_errors=True)
 
@@ -4039,8 +4181,8 @@ def probar_enlace_de_calendario() -> None:
     base = Path(tempfile.mkdtemp(prefix="calendario_"))
     config = {"rutas": {"vault_obsidian": str(base / "vault"), "output": str(base / "Output")}}
     eventos = []
-    originales = (re_.CARPETA_DOCX, re_.notificar_reunion, re_.notificar_evento, ev.RUTA)
-    re_.CARPETA_DOCX, ev.RUTA = base / "OneDrive", base / "evaluaciones.json"
+    originales = (re_.CARPETA_OTRAS, re_.notificar_reunion, re_.notificar_evento, ev.RUTA)
+    re_.CARPETA_OTRAS, ev.RUTA = base / "OneDrive", base / "evaluaciones.json"
     re_.notificar_reunion = lambda *a: None
     re_.notificar_evento = lambda que, cuando, url, lugar="": eventos.append((que, url))
     ev.guardar({"ramos": {}, "pendientes": []})
@@ -4058,7 +4200,7 @@ def probar_enlace_de_calendario() -> None:
         re_.guardar(datos, "2026-09-29", "Entrevista.m4a", dict(config, **{ensayo.CLAVE: True}), dicho)
         check("en ensayo no ofrece eventos", eventos == [])
     finally:
-        re_.CARPETA_DOCX, re_.notificar_reunion, re_.notificar_evento, ev.RUTA = originales
+        re_.CARPETA_OTRAS, re_.notificar_reunion, re_.notificar_evento, ev.RUTA = originales
         shutil.rmtree(base, ignore_errors=True)
 
 
@@ -4580,6 +4722,10 @@ def probar_clase_dificil_espera_la_noche():
     finalizar_clase.procesar_pendientes_reconocidos = procesar
     nocturna._rehacer = lambda ruta, ficha, config: rehechas.append(ficha["slug"])
     estado_vivo.iniciar = estado_vivo.terminar = lambda *a, **k: None
+    # Un candado propio: con el real, la prueba fallaba cuando el vigilante estaba
+    # procesando una grabacion de verdad al mismo tiempo (21-11-2026).
+    from orquestador import lock
+    candado_real, lock.LOCK_PATH = lock.LOCK_PATH, tmp / "orquestador.lock"
 
     def ficha(slug, limite):
         (tmp / f"{slug}.txt").write_text("texto de turbo", encoding="utf-8")
@@ -4606,6 +4752,7 @@ def probar_clase_dificil_espera_la_noche():
     finally:
         (finalizar_clase.procesar_pendientes_reconocidos, nocturna._rehacer, estado_vivo.iniciar,
          estado_vivo.terminar, _telegram.silencio) = originales
+        lock.LOCK_PATH = candado_real
         usar_dir_pendientes(None)
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -4638,6 +4785,179 @@ def probar_respaldo_turbo_si_large_repite_la_pista():
     check("una frase del profesor que contiene palabras de la pista no cuenta",
           not tr._repite_la_pista("Aquí el contexto académico es formal, ¿cierto?", pista))
     check("tampoco una muletilla corta", not tr._repite_la_pista("Solo.\n¿Ya?", pista))
+
+
+def probar_reunion_del_telefono_sin_preguntar() -> None:
+    """
+    "Reu <tema>" sin fecha en el nombre se procesa como reunion sin preguntar. La
+    grabacion del 06-11-2026 espero tres horas un boton de Telegram que nadie vio.
+    """
+    print("\n== una reunion nombrada desde el telefono no se pregunta ==")
+    from orquestador import pregunta_ramo as pr
+    from orquestador import ramo_por_nombre as rpn
+
+    config = {"ramos": {"lunes": {"nombre": "MICROECONOMIA AVANZADA", "perfil_whisper": "es-chile"}},
+              "ramos_adicionales": {}}
+
+    def trabajo(nombre):
+        return {"archivos": [f"/no/existe/{nombre}"]}
+
+    check("'Reu <tema> 2. <persona>', sin fecha, es reunion",
+          pr.sin_preguntar(trabajo("Reu proyecto nuevo 3. Nombre Apellido.m4a"), config) == pr.REUNION)
+    check("'Reunión con el grupo' tambien",
+          pr.sin_preguntar(trabajo("Reunión con el grupo.m4a"), config) == pr.REUNION)
+    check("una clase sigue necesitando la fecha en el nombre",
+          pr.sin_preguntar(trabajo("Microeconomia avanzada.m4a"), config) is None)
+    check("y con fecha se procesa sin preguntar",
+          pr.sin_preguntar(trabajo("Microeconomia avanzada 05.10.26.m4a"), config) == "MICROECONOMIA AVANZADA")
+    check("una palabra que solo empieza igual no es reunion",
+          rpn.resolver(["Reunificacion alemana.m4a"], config)[0] != rpn.RECONOCIDO)
+    check("la grabadora sigue mirando el tema",
+          rpn.resolver(["Reunión Online 05.10.26 - Microeconomia avanzada.m4a"], config)[1]["nombre"]
+          == "MICROECONOMIA AVANZADA")
+
+
+def probar_copias_identicas_se_apartan() -> None:
+    """
+    La reunion del 05-11-2026 llego dos veces, byte por byte igual, y se transcribio
+    dos veces. La copia sale de Input hacia archivos para borrar, sin borrarse.
+    """
+    print("\n== las grabaciones repetidas se apartan ==")
+    base = Path(tempfile.mkdtemp(prefix="copias_"))
+    entrada, apartadas = base / "Input", base / "para borrar"
+    entrada.mkdir()
+    original = entrada / "Reu proyecto.m4a"
+    copia = entrada / "Reu proyecto (2).m4a"
+    distinta = entrada / "Otra del mismo largo.m4a"
+    original.write_bytes(b"A" * 1000)
+    copia.write_bytes(b"A" * 1000)
+    distinta.write_bytes(b"B" * 1000)
+    orig_carpeta = deteccion.CARPETA_COPIAS
+    deteccion.CARPETA_COPIAS = apartadas
+    try:
+        quedan, copias = deteccion.apartar_copias([copia, distinta, original])
+    finally:
+        deteccion.CARPETA_COPIAS = orig_carpeta
+    check("se queda el original, el que no trae '(2)'", original in quedan and copia not in quedan, str(quedan))
+    check("una del mismo tamano pero distinta sigue", distinta in quedan)
+    check("la copia salio de Input", not copia.exists())
+    check("y quedo en archivos para borrar, con su LEEME",
+          (apartadas / copia.name).exists() and (apartadas / "LEEME.txt").exists())
+    check("el original no se toco", original.read_bytes() == b"A" * 1000)
+    check("sin repetidas no aparta nada", deteccion.apartar_copias([original, distinta]) == ([original, distinta], []))
+
+
+def probar_la_secretaria_avisa_si_la_sesion_caduco() -> None:
+    """
+    El 06-11-2026 la sesion de Claude caduco y nadie se entero hasta que una reunion
+    quedo trabada. La secretaria lo comprueba cada manana. El modelo es falso.
+    """
+    print("\n== la secretaria avisa si la sesion de Claude caduco ==")
+    from orquestador import secretaria as se
+    from orquestador import verificar as ve
+
+    avisos = []
+    originales = (ve._preguntar, se.notificar_aviso, se.pregunta_ramo.recordar, se.evaluaciones.cargar)
+    se.notificar_aviso = lambda titulo, mensaje: avisos.append((titulo, mensaje))
+    se.pregunta_ramo.recordar = lambda: 0
+    se.evaluaciones.cargar = lambda: {}
+
+    async def caducada(modelo=None):
+        return False, "Failed to authenticate: OAuth session expired and could not be refreshed"
+
+    async def viva(modelo=None):
+        return True, ""
+
+    try:
+        ve._preguntar = caducada
+        check("caducada: lo dice y da el comando", "auth login" in (ve.problema_de_sesion() or ""))
+        se.main()
+        check("la secretaria avisa", len(avisos) == 1 and "caducó" in avisos[0][1], str(avisos))
+        avisos.clear()
+        ve._preguntar = viva
+        check("viva: no hay problema", ve.problema_de_sesion() is None)
+        se.main()
+        check("y la secretaria no dice nada", avisos == [], str(avisos))
+    finally:
+        ve._preguntar, se.notificar_aviso, se.pregunta_ramo.recordar, se.evaluaciones.cargar = originales
+
+
+def probar_rescate_de_copias_a_medias() -> None:
+    """
+    Una copia de OneDrive que quedo a medias y sin original la termina el vigilante: si
+    el audio se puede leer, pasa a ser audio de verdad y se procesa; si no, se aparta en
+    "archivos para borrar" y se avisa. La que todavia tiene original en la nube no se
+    toca, y la recien empezada tampoco. Este era el agujero que dejo una grabacion cinco
+    dias sin procesar (03-11-2026). Carpetas temporales, ffprobe falso, Telegram falso.
+    """
+    print("\n== rescate de copias a medias de OneDrive ==")
+    from orquestador import pregunta_ramo as pr
+    from orquestador import vigilar_descargas as vd
+
+    base = Path(tempfile.mkdtemp(prefix="parciales_"))
+    entrada, nube, descargas = base / "Input", base / "Nube", base / "Descargas"
+    for c in (entrada, nube, descargas):
+        c.mkdir()
+    config = {"rutas": {"input": str(entrada), "grabaciones_onedrive": str(nube)}}
+    avisos, corridas = [], []
+    originales = (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
+                  vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA,
+                  vd.YA_TOMADAS, vd.PARCIALES_SIN_ORIGINAL, vd.HORAS_PARCIAL_ABANDONADA,
+                  vd.telegram.avisar, vd.estado_vivo.duracion_audio_segundos)
+    vd.YA_TOMADAS = base / "para borrar" / "tomadas"
+    vd.PARCIALES_SIN_ORIGINAL = base / "para borrar" / "a medias"
+    vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS = (lambda: config), descargas, 0
+    vd.procesar_input.main = lambda: corridas.append(sorted(p.name for p in entrada.iterdir()))
+    vd.lock.adquirir_bloqueante, vd.lock.liberar = (lambda: None), (lambda f: None)
+    deteccion.ESTADO_TAMANOS_PATH, pr.RUTA = base / "tamanos.json", base / "preguntas.json"
+    vd.telegram.avisar = lambda texto, **k: avisos.append(texto) or True
+    # ffprobe de verdad no lee un archivo de ejemplo: aqui es audio el que dice "audio".
+    vd.estado_vivo.duracion_audio_segundos = (
+        lambda r: 100.0 if b"audio" in Path(r).read_bytes() else None)
+    vd.HORAS_PARCIAL_ABANDONADA = 0
+    try:
+        completa = entrada / "Clase del lunes.m4a.parcial"
+        completa.write_bytes(b"audio completo")
+        recuperadas = vd.recuperar_parciales(entrada, config)
+        check("una copia completa sin original en la nube pasa a ser audio de verdad",
+              recuperadas == [entrada / "Clase del lunes.m4a"] and not completa.exists()
+              and (entrada / "Clase del lunes.m4a").read_bytes() == b"audio completo", str(recuperadas))
+        check("y se avisa que se rescató", len(avisos) == 1 and "Rescaté" in avisos[0], str(avisos))
+
+        avisos.clear()
+        con_original = entrada / "Clase del martes.m4a.parcial"
+        con_original.write_bytes(b"audio a medias")
+        (nube / "Clase del martes.m4a").write_bytes(b"audio completo")
+        check("la copia cuyo original sigue en OneDrive no se toca: la reescribe la pasada normal",
+              vd.recuperar_parciales(entrada, config) == [] and con_original.exists() and avisos == [])
+
+        vd.HORAS_PARCIAL_ABANDONADA = 24
+        reciente = entrada / "Clase del jueves.m4a.parcial"
+        reciente.write_bytes(b"audio completo")
+        check("una copia recién empezada tampoco: puede estar corriendo en este momento",
+              vd.recuperar_parciales(entrada, config) == [] and reciente.exists() and avisos == [])
+
+        vd.HORAS_PARCIAL_ABANDONADA = 0
+        rota = entrada / "Clase del viernes.m4a.parcial"
+        rota.write_bytes(b"pedazo ilegible")
+        check("la copia que no se puede leer se aparta, sin borrarla",
+              vd.recuperar_parciales(entrada, config) == [entrada / "Clase del jueves.m4a"]
+              and not rota.exists()
+              and (vd.PARCIALES_SIN_ORIGINAL / "Clase del viernes.m4a.parcial").is_file())
+        check("y su aviso dice qué hacer", any("déjalo otra vez" in a for a in avisos), str(avisos))
+
+        avisos.clear()
+        corridas.clear()
+        (entrada / "Clase del sábado.m4a.parcial").write_bytes(b"audio completo")
+        vd.main()
+        check("en la pasada del vigilante, la rescatada entra al procesamiento",
+              corridas and "Clase del sábado.m4a" in corridas[0], str(corridas))
+    finally:
+        (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
+         vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA,
+         vd.YA_TOMADAS, vd.PARCIALES_SIN_ORIGINAL, vd.HORAS_PARCIAL_ABANDONADA,
+         vd.telegram.avisar, vd.estado_vivo.duracion_audio_segundos) = originales
+        shutil.rmtree(base, ignore_errors=True)
 
 
 if __name__ == "__main__":

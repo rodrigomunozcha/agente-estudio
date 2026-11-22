@@ -79,3 +79,5 @@ orquestador/plantilla_hoja/fuentes/
 
 # Documento de diseño con el horario y las fechas reales de evaluaciones: vive solo en este Mac.
 PROMPT-inicial.md
+# Su versión mirando hacia atrás (21-10-2026): trae el nombre del estudiante y sus fallas reales.
+PROMPT-desde-cero.md

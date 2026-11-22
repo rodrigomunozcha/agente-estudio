@@ -618,7 +618,8 @@ _PUNTUACION_TRAS_SUBTITULO = re.compile(r'(<span class="clave">[^<]*</span>)\s*[
 # se imprime chica, en mono y en superindice, asi que la frase quedaba casi
 # ilegible (clase del 26-08-2026, cuatro veces). La frase sale de la marca y queda
 # antes de ella, como texto normal.
-_MARCA_CON_TEXTO = re.compile(r'<span class="f (duda|cl|mas)">\s*(\?|CL|\+)\s*([^<]*?[^<\s])\s*</span>')
+# La marca R es la de las hojas de reunion (reuniones.MARCA_R).
+_MARCA_CON_TEXTO = re.compile(r'<span class="f (duda|cl|mas)">\s*(\?|CL|R|\+)\s*([^<]*?[^<\s])\s*</span>')
 
 
 def pulir_cuerpo(cuerpo: str) -> str:
@@ -663,11 +664,13 @@ async def redactar_cuerpo(
 
 
 async def pedir_hoja(system_prompt: str, prompt: str, etapa: str, slug: str,
-                     minimo_palabras: int = MINIMO_PALABRAS) -> tuple[str | None, str | None]:
+                     minimo_palabras: int = MINIMO_PALABRAS,
+                     modelo: str | None = None) -> tuple[str | None, str | None]:
     """
-    La llamada al modelo que comparten la hoja de clase y la de evaluacion:
-    sin herramientas, el material dentro del prompt, y el HTML de vuelta ya
-    saneado con lista blanca. Devuelve (cuerpo, None) o (None, motivo).
+    La llamada al modelo que comparten la hoja de clase, la de evaluacion y la
+    de reunion: sin herramientas, el material dentro del prompt, y el HTML de
+    vuelta ya saneado con lista blanca. Devuelve (cuerpo, None) o (None, motivo).
+    La de reunion pasa su modelo (reuniones.MODELO). Sin modelo, el de la cuenta.
     """
     options = ClaudeAgentOptions(
         cwd=str(PROJECT_ROOT),
@@ -678,6 +681,7 @@ async def pedir_hoja(system_prompt: str, prompt: str, etapa: str, slug: str,
         permission_mode="bypassPermissions",
         cli_path=str(CLI_PATH),
         max_turns=MAX_TURNS,
+        model=modelo,
     )
 
     partes: list[str] = []

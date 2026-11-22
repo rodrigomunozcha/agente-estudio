@@ -5,7 +5,8 @@
     "procesados": "/Users/tu_usuario/Documents/Claude Code/Procesados",
     "vault_obsidian": "/Users/tu_usuario/ruta/a/tu/vault/de/Obsidian",
     "transcriptotem": "/Users/tu_usuario/ruta/a/Transcriptotem_WebApp_v2",
-    "grabaciones_onedrive": "/Users/tu_usuario/Library/CloudStorage/OneDrive-Personal/Audios a transcribir por el Agente"
+    "grabaciones_onedrive": "/Users/tu_usuario/Library/CloudStorage/OneDrive-Personal/Audios a transcribir por el Agente",
+    "reuniones_practica": "/Users/tu_usuario/Library/CloudStorage/OneDrive-Personal/ruta/a/tu/practica/Reuniones"
   },
   "semestre": {
     "fecha_inicio": "2026-08-03"

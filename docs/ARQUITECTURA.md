@@ -63,7 +63,7 @@ con las rutas de este Mac.
 |---|---|---|
 | `local.agente-estudio.airdrop` | `vigilar_descargas` | Cuando cambia Descargas (AirDrop), `Input/` o la carpeta `rutas.grabaciones_onedrive`, y cada 10 minutos. Si cambias esas rutas, vuelve a correr `launchd/instalar_vigilante.sh` |
 | `local.agente-estudio.bot` | `bot` | Siempre, esperando mensajes de Telegram |
-| `local.agente-estudio.secretaria` | `secretaria` | Todos los días a las 9:00. Si no hay nada que decir, no escribe |
+| `local.agente-estudio.secretaria` | `secretaria` | Todos los días a las 9:00. Si no hay nada que decir, no escribe. Al final comprueba que la sesión de Claude siga viva y, si no, avisa por Telegram y en el Mac |
 | `local.agente-estudio.nocturna` | `nocturna` | A las 4:00 y a las 7:05. Rehace con large-v3 las clases de audio difícil, y a las 7:05 procesa con el texto de turbo las que no alcanzaron. Si no hay ninguna, no hace nada |
 | `local.agente-estudio.grabadora` | `grabadora/Grabadora.app` | Siempre, como botón en la barra de menú para grabar reuniones on-line |
 
@@ -123,8 +123,13 @@ El camino de una clase:
 5. `notificaciones` avisa en el Mac y repite en Telegram solo los avisos finales.
 
 Una grabación con ramo `REUNIÓN` se desvía a `reuniones.py`. Deja una nota en `Reuniones/`
-del vault y un `.docx` en su propia carpeta con fecha en OneDrive (`reuniones.CARPETA_DOCX`), con el
-audio comprimido y la transcripción al lado y con el mismo nombre, manda las acciones a los pendientes y las promesas con
+del vault (la lee el bot) y una hoja `.html` en su propia carpeta con fecha en OneDrive, con el
+audio comprimido y la transcripción al lado y con el mismo nombre. Las de la práctica van a
+`rutas.reuniones_practica` de `config.json` y suman al `Mapa de la empresa.html` de esa carpeta
+(datos en `.mapa de la empresa.json`, al lado). Las demás, a `reuniones.CARPETA_OTRAS`. La hoja la
+redacta una tercera llamada, sin herramientas (`plantilla_reunion/instrucciones_hoja.md`), y Python
+le pone arriba las tareas y promesas con su cita. Para rehacerla con el formato de hoy:
+`python3 -m orquestador.reuniones --rehacer <slug>`. Además manda las acciones a los pendientes y las promesas con
 plazo de la otra parte como seguimientos (solo lo que tiene cita en la transcripción, que
 Python comprueba) y ofrece un botón
 que abre Google Calendar con el evento lleno.
