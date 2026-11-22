@@ -4089,7 +4089,9 @@ def probar_vigilante_de_input_y_onedrive() -> None:
     corridas = []
     originales = (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
                   vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.YA_TOMADAS,
-                  vd.time.sleep)
+                  vd.time.sleep, vd.telegram.avisar)
+    avisos = []
+    vd.telegram.avisar = lambda texto, *a, **k: avisos.append(texto)
     vd.YA_TOMADAS = base / "para borrar"
     vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS = (lambda: config), descargas, 0
     vd.procesar_input.main = lambda: corridas.append(sorted(p.name for p in entrada.iterdir()))
@@ -4105,12 +4107,14 @@ def probar_vigilante_de_input_y_onedrive() -> None:
         check("el original queda en archivos para borrar, no borrado, y lo demás no se toca",
               (vd.YA_TOMADAS / "Clase del martes.m4a").is_file() and (nube / "notas.txt").is_file()
               and not (nube / "Clase del martes.m4a").exists())
+        check("y avisa por Telegram que la recibió", avisos == ["📥 Recibí «Clase del martes». Te aviso cuando esté lista."],
+              str(avisos))
 
         creciendo = nube / "Subiendo.m4a"
         creciendo.write_bytes(b"a")
         vd.time.sleep = lambda s: creciendo.write_bytes(creciendo.read_bytes() + b"mas")
         vd.main()
-        vd.time.sleep = originales[-1]  # el sleep de verdad
+        vd.time.sleep = originales[-2]  # el sleep de verdad
         check("una grabación que sigue creciendo no se toma",
               creciendo.exists() and not (entrada / "Subiendo.m4a").exists())
 
@@ -4145,7 +4149,7 @@ def probar_vigilante_de_input_y_onedrive() -> None:
     finally:
         (vd.cargar_config, vd.DESCARGAS, vd.ESPERA_TAMANO_SEGUNDOS, vd.procesar_input.main,
          vd.lock.adquirir_bloqueante, vd.lock.liberar, deteccion.ESTADO_TAMANOS_PATH, pr.RUTA, vd.YA_TOMADAS,
-         vd.time.sleep) = originales
+         vd.time.sleep, vd.telegram.avisar) = originales
         shutil.rmtree(base, ignore_errors=True)
 
 

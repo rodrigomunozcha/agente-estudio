@@ -199,8 +199,15 @@ def main() -> None:
     input_dir = Path(config["rutas"]["input"])
     airdrop, nube = audios_de_airdrop(DESCARGAS), audios_de_onedrive(config)
     listos = set(estables(airdrop + nube))  # una sola espera para las dos entradas
-    mover_a_input([p for p in airdrop if p in listos], input_dir)
-    traer_de_onedrive([p for p in nube if p in listos], input_dir)
+    recibidas = (mover_a_input([p for p in airdrop if p in listos], input_dir)
+                 + traer_de_onedrive([p for p in nube if p in listos], input_dir))
+    if recibidas:
+        # Desde el iPhone no se veia cuando el Mac tomaba una grabacion: la carpeta de
+        # OneDrive solo se vacia, y el primer aviso era el de lista, horas despues
+        # (pedido del estudiante, 22-11-2026).
+        nombres = ", ".join(f"«{p.stem}»" for p in recibidas)
+        cuando = "esté lista" if len(recibidas) == 1 else "estén listas"
+        telegram.avisar(f"📥 Recibí {nombres}. Te aviso cuando {cuando}.")
     recuperar_parciales(input_dir, config)
     if not nuevos_en_input(input_dir):
         return
