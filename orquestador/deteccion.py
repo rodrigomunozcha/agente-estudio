@@ -15,19 +15,22 @@ de creacion del archivo (birthtime), que en varios sistemas de archivos se
 resetea al copiar. El mtime sobrevive a AirDrop, pero no a OneDrive, donde es la
 hora de subida.
 """
+import hashlib
 import json
 import re
+import shutil
 import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import ramo_por_nombre
-from .config import cargar_config, DIAS_SEMANA
+from . import ramo_por_nombre, telegram
+from .config import CARPETA_PARA_BORRAR, cargar_config, DIAS_SEMANA
 
 EXTENSIONES_AUDIO = {".m4a", ".mp3", ".wav"}
 
 ESTADO_TAMANOS_PATH = Path(__file__).parent / "estado_tamanos.json"
 TRABAJOS_EMITIDOS_PATH = Path(__file__).parent / "trabajos_emitidos.json"
+CARPETA_COPIAS = CARPETA_PARA_BORRAR / "Agente estudio - grabaciones repetidas"
 
 NOMBRES_DIA = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
 
@@ -197,6 +200,60 @@ def actualizar_estables(input_dir: Path) -> list[Path]:
     return estables
 
 
+def _huella(archivo: Path) -> str:
+    h = hashlib.sha256()
+    with open(archivo, "rb") as f:
+        for bloque in iter(lambda: f.read(1 << 20), b""):
+            h.update(bloque)
+    return h.hexdigest()
+
+
+def apartar_copias(archivos: list[Path]) -> tuple[list[Path], list[Path]]:
+    """
+    Saca de la lista, y de Input, las copias exactas de otra grabacion. Devuelve
+    (las que siguen, las copias apartadas).
+
+    Por que. La reunion del 05-11-2026 llego dos veces, "X.m4a" y "X (2).m4a", byte
+    por byte iguales. Se transcribio dos veces, el analisis leyo el doble de texto y
+    se archivaron los dos audios como "parte 1" y "parte 2".
+
+    Se queda la de nombre mas corto, que es la que no trae el "(2)" que agrega el
+    sistema al copiar. La copia no se borra: va a archivos para borrar, con un
+    LEEME, y el estudiante la borra a mano (regla 2 del CLAUDE.md global). Sacarla
+    solo de la lista no basta: en la corrida siguiente quedaria sola en Input y se
+    procesaria como una grabacion nueva.
+
+    Solo se calcula la huella de los archivos que comparten tamano, que en la
+    practica es ninguno: leer 30 MB por grabacion en cada corrida no hace falta.
+    """
+    por_tamano: dict[int, list[Path]] = {}
+    for archivo in archivos:
+        por_tamano.setdefault(archivo.stat().st_size, []).append(archivo)
+    copias = []
+    for mismos in por_tamano.values():
+        vistas: set[str] = set()
+        for archivo in sorted(mismos, key=lambda a: (len(a.name), a.name)) if len(mismos) > 1 else []:
+            huella = _huella(archivo)
+            if huella in vistas:
+                copias.append(archivo)
+            vistas.add(huella)
+    for copia in copias:
+        CARPETA_COPIAS.mkdir(parents=True, exist_ok=True)
+        destino, n = CARPETA_COPIAS / copia.name, 2
+        while destino.exists():
+            destino, n = CARPETA_COPIAS / f"{copia.stem} ({n}){copia.suffix}", n + 1
+        shutil.move(str(copia), str(destino))
+        leeme = CARPETA_COPIAS / "LEEME.txt"
+        if not leeme.exists():
+            leeme.write_text(
+                "Grabaciones que llegaron a Input repetidas: cada una es una copia exacta,\n"
+                "byte por byte, de otra que si se proceso. Se apartaron para no transcribir\n"
+                "dos veces lo mismo (deteccion.apartar_copias). Se pueden borrar.\n",
+                encoding="utf-8",
+            )
+    return [a for a in archivos if a not in copias], copias
+
+
 def agrupar_por_fecha(archivos: list[Path]) -> dict[date, list[Path]]:
     grupos: dict[date, list[Path]] = {}
     for archivo in archivos:
@@ -269,7 +326,12 @@ def construir_trabajos(config: dict | None = None) -> list[dict]:
     input_dir = Path(config["rutas"]["input"])
     emitidos = _cargar_json(TRABAJOS_EMITIDOS_PATH)
 
-    estables = actualizar_estables(input_dir)
+    estables, copias = apartar_copias(actualizar_estables(input_dir))
+    if copias:
+        nombres = ", ".join(c.name for c in copias)
+        print(f"Copias exactas apartadas a {CARPETA_COPIAS}: {nombres}")
+        telegram.avisar(f"📎 Llegaron grabaciones repetidas: {nombres}. Proceso solo el original. "
+                        "Las copias quedaron en archivos para borrar.")
     grupos = agrupar_por_fecha(estables)
 
     trabajos = []

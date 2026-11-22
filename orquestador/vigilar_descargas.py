@@ -33,19 +33,28 @@ Las otras dos entradas (issue #1, 14-10-2026):
   copiarla la descarga completa. La copia se escribe con un nombre que no es de audio y
   recien completa toma el suyo, asi nadie toma una a medias. El original pasa a la
   carpeta comun "archivos para borrar" (config.CARPETA_PARA_BORRAR): nunca se borra.
+
+Las copias a medias que quedan sin original las rescata recuperar_parciales, en cada
+pasada: sin eso, una copia completa a la que ya nadie puede volver a traer se queda en
+Input para siempre (paso con la grabacion del 03-11-2026, cinco dias).
 """
 import shutil
 import subprocess
 import time
 from pathlib import Path
 
-from . import deteccion, lock, pregunta_ramo, procesar_input
+from . import deteccion, estado_vivo, lock, pregunta_ramo, procesar_input, telegram
 from .config import CARPETA_PARA_BORRAR, cargar_config
 from .deteccion import EXTENSIONES_AUDIO
 
 DESCARGAS = Path.home() / "Downloads"
 ESPERA_TAMANO_SEGUNDOS = 3
 YA_TOMADAS = CARPETA_PARA_BORRAR / "Agente estudio - grabaciones ya tomadas de OneDrive"
+PARCIALES_SIN_ORIGINAL = CARPETA_PARA_BORRAR / "Agente estudio - copias a medias de OneDrive"
+# Una copia en curso lleva segundos; una abandonada, horas. Se mira el ctime y no el
+# mtime: shutil.copy2 le deja al .parcial el mtime del original, que puede ser de hace
+# dias, y entonces una copia recien empezada pareceria vieja.
+HORAS_PARCIAL_ABANDONADA = 1
 
 
 def llego_por_airdrop(ruta: Path) -> bool:
@@ -97,13 +106,70 @@ def traer_de_onedrive(archivos: list[Path], input_dir: Path) -> list[Path]:
             shutil.copy2(p, parcial)
             if parcial.stat().st_size != p.stat().st_size:
                 raise OSError("la copia quedó incompleta")
-        except OSError:
+        except OSError as e:
+            # El motivo queda escrito: un error que puede costar una clase no se traga
+            # (ver CODING_STANDARDS). El 03-11-2026 este except se comio el porque y la
+            # copia quedo a medias sin que ninguna linea lo dijera. Sin aviso al
+            # estudiante a proposito: mientras el original siga en OneDrive la proxima
+            # pasada reintenta sola cada 10 minutos, y el vigia del bot avisa si algo
+            # lleva dos horas atascado en Input. Lo que si necesita aviso es la copia que
+            # se queda sin original, y eso lo hace recuperar_parciales.
+            print(f"No se pudo traer «{p.name}» de OneDrive: {e}")
             continue  # la copia a medias queda como .parcial y la proxima se escribe encima
         parcial.rename(destino)
         YA_TOMADAS.mkdir(parents=True, exist_ok=True)
         shutil.move(str(p), _libre(YA_TOMADAS / p.name))
         traidas.append(destino)
     return traidas
+
+
+def recuperar_parciales(input_dir: Path, config: dict) -> list[Path]:
+    """Rescata las copias a medio traer de OneDrive que se quedaron sin original.
+
+    traer_de_onedrive confiaba en que "la proxima se escribe encima", y eso solo vale
+    mientras el original siga en la carpeta de la nube. La grabacion del 03-11-2026
+    estuvo cinco dias sin procesarse: su .parcial estaba entero (mismo tamano y la misma
+    duracion que el original, comprobado con ffprobe el 08-11-2026), pero el original ya
+    no estaba en OneDrive, y un .parcial no es audio para deteccion, asi que nadie lo
+    volvio a mirar. El vigia del bot lo aviso a las dos horas, que es todo lo que podia
+    hacer: nada en el sistema sabia terminar el trabajo.
+
+    Un .parcial con su original todavia en OneDrive no se toca, porque la pasada de
+    traer_de_onedrive lo reescribe entero, y porque puede ser una copia corriendo en este
+    momento. Uno que ffprobe no puede leer se aparta en "archivos para borrar", nunca se
+    borra, y se avisa: ahi se perdio material y hay que dejar el audio de nuevo.
+    """
+    if not input_dir.is_dir():
+        return []
+    en_la_nube = {p.name for p in audios_de_onedrive(config)}
+    recuperadas = []
+    for parcial in sorted(input_dir.glob("*.parcial")):
+        audio = parcial.with_name(parcial.name.removesuffix(".parcial"))
+        if audio.name in en_la_nube:
+            continue
+        if time.time() - parcial.stat().st_ctime < HORAS_PARCIAL_ABANDONADA * 3600:
+            continue
+        if estado_vivo.duracion_audio_segundos(parcial) is None:
+            PARCIALES_SIN_ORIGINAL.mkdir(parents=True, exist_ok=True)
+            apartada = _libre(PARCIALES_SIN_ORIGINAL / parcial.name)
+            shutil.move(str(parcial), apartada)
+            print(f"Copia a medias que no se puede leer, apartada: {apartada}")
+            telegram.avisar(
+                f"⚠️ Una grabación quedó a medio copiar desde OneDrive y no se puede leer: "
+                f"{audio.name}\n\nYa no está en OneDrive para traerla de nuevo, así que la "
+                f"aparté en «archivos para borrar» (no la borré).\n"
+                f"👉 Si todavía tienes el audio en el teléfono, déjalo otra vez en la carpeta "
+                f"de OneDrive y lo proceso solo.")
+            continue
+        destino = _libre(audio)
+        parcial.rename(destino)
+        print(f"Copia a medias rescatada, estaba completa: ahora es {destino}")
+        telegram.avisar(
+            f"🎧 Rescaté una grabación que se quedó a medio traer desde OneDrive: "
+            f"{destino.name}\n\nLa copia estaba completa, así que la proceso ahora y te "
+            f"aviso cuando esté la hoja.")
+        recuperadas.append(destino)
+    return recuperadas
 
 
 def nuevos_en_input(input_dir: Path) -> list[Path]:
@@ -135,6 +201,7 @@ def main() -> None:
     listos = set(estables(airdrop + nube))  # una sola espera para las dos entradas
     mover_a_input([p for p in airdrop if p in listos], input_dir)
     traer_de_onedrive([p for p in nube if p in listos], input_dir)
+    recuperar_parciales(input_dir, config)
     if not nuevos_en_input(input_dir):
         return
     # Si ya hay un procesamiento corriendo, se espera a que termine: ese ya
