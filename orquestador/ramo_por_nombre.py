@@ -66,6 +66,7 @@ UMBRAL_PALABRA = 0.85
 # este modulo.
 RAMO_REUNION = "REUNIÓN"
 PREFIJO_REUNION_ONLINE = "reunion online"
+_MARCA_REUNION = re.compile(r"(reu|reunion|reuniones)\b")
 
 RECONOCIDO = "reconocido"
 SIN_SENAL = "sin_senal"
@@ -198,6 +199,15 @@ def resolver(nombres_archivo: list[str], config: dict) -> tuple[str, dict | None
         # clon nuevo trae ramos_adicionales vacio (revision del 15-10-2026).
         if limpio.startswith(PREFIJO_REUNION_ONLINE):
             resultados.append((RECONOCIDO, _ramo_del_tema(limpio[len(PREFIJO_REUNION_ONLINE):], conocidos)))
+            continue
+        # El estudiante nombra sus reuniones desde el telefono "Reu <tema>" o
+        # "Reunión <tema>". Sin esta marca el tema no calzaba con ningun ramo y se
+        # preguntaba por Telegram: la grabacion del 06-11-2026 espero tres horas una
+        # respuesta que nadie vio. Aqui el tema no se mira, a diferencia de la
+        # grabadora: una reunion grabada a proposito sobre un ramo sigue siendo
+        # reunion.
+        if _MARCA_REUNION.match(limpio):
+            resultados.append((RECONOCIDO, RAMO_REUNION))
             continue
         con_contenido = {
             p for p in _palabras_utiles(limpio) if p not in PALABRAS_SIN_CONTENIDO

@@ -9,7 +9,7 @@ preguntarse (issue #1). Ahora la ventana no aparece en ningun camino.
 
 Las reglas, en orden:
   1. El nombre de todos los archivos dice el ramo (ramo_por_nombre) y la fecha: se
-     procesa sin preguntar.
+     procesa sin preguntar. Una reunion ("Reu <tema>") no necesita la fecha.
   2. El nombre no dice nada: la hora en que empezo a grabarse (la que trae el audio) se
      cruza con el horario. Si cae en una clase, se propone ese ramo, con un primer boton
      para confirmarlo.
@@ -108,11 +108,16 @@ def opciones(config: dict) -> list[str]:
 
 
 def sin_preguntar(trabajo: dict, config: dict) -> str | None:
-    """El ramo, si el nombre de cada archivo dice el ramo y la fecha. Con eso la
-    grabacion se procesa sin preguntar nada (regla 1)."""
+    """El ramo, si el nombre de cada archivo dice el ramo y la fecha, o si dice que es
+    una reunion. Con eso la grabacion se procesa sin preguntar nada (regla 1)."""
     nombres = [Path(a).name for a in trabajo["archivos"]]
     estado, info = ramo_por_nombre.resolver(nombres, config)
-    if estado == ramo_por_nombre.RECONOCIDO and all(deteccion._fecha_de_nombre_plausible(n) for n in nombres):
+    if estado != ramo_por_nombre.RECONOCIDO:
+        return None
+    # Una reunion no necesita la fecha en el nombre: no lleva numero de clase que
+    # cuadrar con el calendario, y la fecha que trae el audio basta para su hoja. Las
+    # del telefono ("Reu <tema>") nunca la traen (06-11-2026).
+    if info["nombre"] == REUNION or all(deteccion._fecha_de_nombre_plausible(n) for n in nombres):
         return info["nombre"]
     return None
 
@@ -260,3 +265,26 @@ def recordar(ahora: datetime | None = None) -> int:
                 if clave in estado:
                     estado[clave]["recordada"] = ahora.isoformat(timespec="seconds")
     return len(recordadas)
+
+
+if __name__ == "__main__":
+    # Para responder desde la Terminal cuando Telegram no llega o el boton no se vio.
+    # El 06-11-2026 una reunion espero tres horas y hubo que anotar la respuesta a mano.
+    #   python3 -m orquestador.pregunta_ramo              lista lo que espera respuesta
+    #   python3 -m orquestador.pregunta_ramo <id> <ramo>  la responde (REUNIÓN, o un ramo)
+    import sys
+
+    abiertas = [x for x in _leer().values() if not x.get("respuesta")]
+    if len(sys.argv) < 3:
+        if not abiertas:
+            print("No hay grabaciones esperando respuesta.")
+        for x in abiertas:
+            print(f"{x['id']}  {x['cuando']}: {', '.join(Path(a).name for a in x['archivos'])}")
+            print(f"            opciones: {', '.join(x['opciones'])}")
+        sys.exit(0)
+    id_pregunta, ramo = sys.argv[1], " ".join(sys.argv[2:])
+    pregunta = next((x for x in abiertas if x["id"] == id_pregunta), None)
+    if pregunta is None or ramo not in pregunta["opciones"]:
+        sys.exit("No hay una pregunta abierta con ese id, o ese ramo no es una de sus opciones.")
+    responder(id_pregunta, pregunta["opciones"].index(ramo))
+    print("Anotado. Para procesarla ahora: python3 -m orquestador.procesar_input --esperar")
