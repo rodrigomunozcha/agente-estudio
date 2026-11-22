@@ -41,6 +41,9 @@ orquestador/propuestas_memoria/
 # traen nombres de archivos y rutas de este Mac.
 orquestador/preguntas_grabaciones.json
 orquestador/preguntas_grabaciones.lock
+# Las grabaciones ya procesadas, para no procesarlas de nuevo (huellas.py): traen el
+# nombre de cada grabacion y el tema de cada clase o reunion.
+orquestador/grabaciones_procesadas/
 orquestador/preguntas_grabaciones.tmp
 Estado.txt
 

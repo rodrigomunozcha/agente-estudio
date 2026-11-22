@@ -27,6 +27,7 @@ la numeracion de las clases y la renumeracion de las hojas las leen alla.
 import shutil
 from pathlib import Path
 
+from . import huellas
 from .comprimir_notas_voz import comprimir_en_sitio
 from .ensayo import es_ensayo
 from .nombres import nombre_base
@@ -54,6 +55,13 @@ def archivar_audio(trabajo: dict, titulo: str, config: dict, bitacora=None) -> l
                 continue
             shutil.copy2(str(origen), str(destino))
         else:
+            # Antes de mover y comprimir, que cambia los bytes: lo que se anota es la
+            # grabacion tal como llega, para reconocerla si vuelve (ver huellas.py). Si
+            # falla, la clase se archiva igual: solo pierde esa proteccion.
+            try:
+                huellas.registrar(origen, destino.stem, bitacora)
+            except OSError as e:
+                print(f"[archivado] no se anoto la huella de {origen.name}: {e}", flush=True)
             # Se anota ANTES de mover: si el corte llega justo despues del
             # movimiento pero antes de anotarlo, el audio quedaria fuera de
             # su sitio sin nada que lo devuelva.

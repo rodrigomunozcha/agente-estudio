@@ -89,7 +89,9 @@ El camino de una clase:
 1. `vigilar_descargas` reconoce lo que llegó por AirDrop (cuarentena puesta por
    `sharingd`), lo mueve a `Input/` y llama a `procesar_input`, que toma el candado de
    `lock.py`.
-2. `deteccion` agrupa las grabaciones y resuelve el ramo: primero por el nombre del archivo,
+2. `deteccion` aparta a `archivos para borrar` las copias exactas: las que llegan juntas y las
+   de una grabación ya procesada otro día (`huellas`, que `archivado` anota al mover cada audio).
+   Después agrupa las grabaciones y resuelve el ramo: primero por el nombre del archivo,
    y si no, por el día de la semana de `config.json`. `pregunta_ramo` decide si hace falta
    preguntar: si el nombre dice el ramo y la fecha, no pregunta. Si no, pregunta por Telegram
    con un botón por ramo, la grabación queda en `Input/` y el bot, al recibir el botón, anota
@@ -152,6 +154,9 @@ Datos de estado (cuáles quedan fuera de git lo dice `.gitignore`):
   últimas 20 respuestas, para que un 👍/👎 sepa a qué pregunta corresponde.
 - `orquestador/preguntas_grabaciones.json`: las grabaciones que esperan que el estudiante
   diga de qué son (`pregunta_ramo`), con su respuesta cuando llega.
+- `orquestador/grabaciones_procesadas/`: un archivo por audio ya procesado, con su tamaño y
+  su huella en el nombre (`huellas`). Lo anterior al 22-11-2026 se sembró con
+  `$PY -m orquestador.huellas <carpeta>`.
 - `orquestador/propuestas_memoria/`: lo que una reunión ofreció guardar en la wiki, un
   archivo por oferta, marcado como respondido cuando se toca el botón.
 

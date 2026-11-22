@@ -15,7 +15,6 @@ de creacion del archivo (birthtime), que en varios sistemas de archivos se
 resetea al copiar. El mtime sobrevive a AirDrop, pero no a OneDrive, donde es la
 hora de subida.
 """
-import hashlib
 import json
 import re
 import shutil
@@ -23,7 +22,7 @@ import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import ramo_por_nombre, telegram
+from . import huellas, ramo_por_nombre, telegram
 from .config import CARPETA_PARA_BORRAR, cargar_config, DIAS_SEMANA
 
 EXTENSIONES_AUDIO = {".m4a", ".mp3", ".wav"}
@@ -200,14 +199,6 @@ def actualizar_estables(input_dir: Path) -> list[Path]:
     return estables
 
 
-def _huella(archivo: Path) -> str:
-    h = hashlib.sha256()
-    with open(archivo, "rb") as f:
-        for bloque in iter(lambda: f.read(1 << 20), b""):
-            h.update(bloque)
-    return h.hexdigest()
-
-
 def apartar_copias(archivos: list[Path]) -> tuple[list[Path], list[Path]]:
     """
     Saca de la lista, y de Input, las copias exactas de otra grabacion. Devuelve
@@ -223,35 +214,61 @@ def apartar_copias(archivos: list[Path]) -> tuple[list[Path], list[Path]]:
     solo de la lista no basta: en la corrida siguiente quedaria sola en Input y se
     procesaria como una grabacion nueva.
 
-    Solo se calcula la huella de los archivos que comparten tamano, que en la
-    practica es ninguno: leer 30 MB por grabacion en cada corrida no hace falta.
+    Solo se calcula la huella de los archivos con el mismo largo de audio, que en la
+    practica es ninguno: leer 30 MB por grabacion en cada corrida no hace falta. Se
+    compara el audio y no el archivo (ver huellas.py).
     """
     por_tamano: dict[int, list[Path]] = {}
     for archivo in archivos:
-        por_tamano.setdefault(archivo.stat().st_size, []).append(archivo)
+        por_tamano.setdefault(huellas.largo_audio(archivo), []).append(archivo)
     copias = []
     for mismos in por_tamano.values():
         vistas: set[str] = set()
         for archivo in sorted(mismos, key=lambda a: (len(a.name), a.name)) if len(mismos) > 1 else []:
-            huella = _huella(archivo)
+            huella = huellas.huella(archivo)
             if huella in vistas:
                 copias.append(archivo)
             vistas.add(huella)
     for copia in copias:
-        CARPETA_COPIAS.mkdir(parents=True, exist_ok=True)
-        destino, n = CARPETA_COPIAS / copia.name, 2
-        while destino.exists():
-            destino, n = CARPETA_COPIAS / f"{copia.stem} ({n}){copia.suffix}", n + 1
-        shutil.move(str(copia), str(destino))
-        leeme = CARPETA_COPIAS / "LEEME.txt"
-        if not leeme.exists():
-            leeme.write_text(
-                "Grabaciones que llegaron a Input repetidas: cada una es una copia exacta,\n"
-                "byte por byte, de otra que si se proceso. Se apartaron para no transcribir\n"
-                "dos veces lo mismo (deteccion.apartar_copias). Se pueden borrar.\n",
-                encoding="utf-8",
-            )
+        _apartar(copia)
     return [a for a in archivos if a not in copias], copias
+
+
+def apartar_ya_procesadas(archivos: list[Path]) -> tuple[list[Path], list[tuple[Path, dict]]]:
+    """
+    Saca de la lista, y de Input, las grabaciones identicas a una que ya se proceso otro
+    dia. Devuelve (las que siguen, [(apartada, lo anotado de la original)]).
+
+    apartar_copias solo ve lo que esta junto en Input. El 22-11-2026 volvieron dos
+    grabaciones del 11-11 ya procesadas, y se procesaron de nuevo (ver huellas.py).
+    """
+    siguen, apartadas = [], []
+    for archivo in archivos:
+        original = huellas.ya_procesada(archivo)
+        if original is None:
+            siguen.append(archivo)
+        else:
+            _apartar(archivo)
+            apartadas.append((archivo, original))
+    return siguen, apartadas
+
+
+def _apartar(copia: Path) -> None:
+    """Mueve una grabacion repetida a archivos para borrar, sin pisar otra del mismo nombre."""
+    CARPETA_COPIAS.mkdir(parents=True, exist_ok=True)
+    destino, n = CARPETA_COPIAS / copia.name, 2
+    while destino.exists():
+        destino, n = CARPETA_COPIAS / f"{copia.stem} ({n}){copia.suffix}", n + 1
+    shutil.move(str(copia), str(destino))
+    leeme = CARPETA_COPIAS / "LEEME.txt"
+    if not leeme.exists():
+        leeme.write_text(
+            "Grabaciones que llegaron a Input repetidas: cada una es una copia exacta,\n"
+            "byte por byte, de otra que si se proceso. Se apartaron para no transcribir\n"
+            "dos veces lo mismo (deteccion.apartar_copias y apartar_ya_procesadas).\n"
+            "Se pueden borrar.\n",
+            encoding="utf-8",
+        )
 
 
 def agrupar_por_fecha(archivos: list[Path]) -> dict[date, list[Path]]:
@@ -332,6 +349,12 @@ def construir_trabajos(config: dict | None = None) -> list[dict]:
         print(f"Copias exactas apartadas a {CARPETA_COPIAS}: {nombres}")
         telegram.avisar(f"📎 Llegaron grabaciones repetidas: {nombres}. Proceso solo el original. "
                         "Las copias quedaron en archivos para borrar.")
+    estables, ya_procesadas = apartar_ya_procesadas(estables)
+    for archivo, original in ya_procesadas:
+        print(f"Ya procesada, apartada a {CARPETA_COPIAS}: {archivo.name} = {original['como']}")
+        cuando = datetime.strptime(original["procesada"], "%Y-%m-%d").strftime("%d-%m")
+        telegram.avisar(f"📎 «{archivo.stem}» ya la procesé el {cuando}, como «{original['como']}». "
+                        "No la proceso de nuevo. Quedó en archivos para borrar.")
     grupos = agrupar_por_fecha(estables)
 
     trabajos = []

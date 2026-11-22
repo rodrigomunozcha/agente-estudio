@@ -31,6 +31,10 @@ _telegram.token = lambda: None
 # Ni la bandeja de avisos atrasados: el 21-10-2026 una prueba que simula un corte dejo un
 # "hola" en la bandeja real cada vez que corrian las pruebas, y el bot se lo mando 7 veces.
 _telegram.BANDEJA = Path(tempfile.mkdtemp(prefix="bandeja_pruebas_")) / "pendientes.jsonl"
+# Ni el registro de grabaciones ya procesadas: archivar_audio anota ahi cada audio que mueve,
+# y un audio de prueba anotado en el real quedaria marcado como procesado.
+from orquestador import huellas as _huellas
+_huellas.REGISTRO = Path(tempfile.mkdtemp(prefix="huellas_pruebas_"))
 from orquestador.config import PENDIENTES_DIR_POR_DEFECTO, dir_pendientes, usar_dir_pendientes
 
 fallos: list[str] = []
@@ -4849,6 +4853,61 @@ def probar_copias_identicas_se_apartan() -> None:
           (apartadas / copia.name).exists() and (apartadas / "LEEME.txt").exists())
     check("el original no se toco", original.read_bytes() == b"A" * 1000)
     check("sin repetidas no aparta nada", deteccion.apartar_copias([original, distinta]) == ([original, distinta], []))
+
+
+def probar_una_grabacion_ya_procesada_se_aparta() -> None:
+    """
+    El 22-11-2026 volvieron a llegar dos grabaciones del 11-11 que ya eran partes de una
+    reunion procesada, y se procesaron otra vez. Al archivar, cada audio queda anotado por
+    su contenido, y si vuelve, aunque traiga otro nombre, sale de Input sin procesarse.
+    """
+    print("\n== una grabacion ya procesada se aparta ==")
+    from orquestador import huellas
+    from orquestador.archivado import archivar_audio
+
+    base = Path(tempfile.mkdtemp(prefix="ya_procesadas_"))
+    entrada, apartadas = base / "Input", base / "para borrar"
+    entrada.mkdir()
+    procesada = entrada / "Reu proyecto 01.01.36.m4a"
+    procesada.write_bytes(b"A" * 1000)
+    trabajo = {"ramo": "REUNIÓN", "fecha": "2036-01-01", "archivos": [str(procesada)]}
+    orig_registro, orig_carpeta = huellas.REGISTRO, deteccion.CARPETA_COPIAS
+    huellas.REGISTRO, deteccion.CARPETA_COPIAS = base / "registro", apartadas
+    try:
+        archivar_audio(trabajo, "Tema", {"rutas": {"procesados": str(base / "Procesados")}})
+        check("al archivar queda anotada", len(list(huellas.REGISTRO.glob("1000_*.json"))) == 1)
+
+        vuelve = entrada / "Otro nombre.m4a"
+        vuelve.write_bytes(b"A" * 1000)
+        distinta = entrada / "Nueva del mismo largo.m4a"
+        distinta.write_bytes(b"B" * 1000)
+        quedan, ya = deteccion.apartar_ya_procesadas([vuelve, distinta])
+        check("la que vuelve, aunque cambie de nombre, no se procesa", quedan == [distinta], str(quedan))
+        check("y dice como quedo la primera vez",
+              len(ya) == 1 and ya[0][1]["como"].startswith("01.01.36 - Tema"), str(ya))
+        check("salio de Input hacia archivos para borrar",
+              not vuelve.exists() and (apartadas / vuelve.name).exists())
+        check("una nueva del mismo largo sigue", distinta.exists())
+
+        # El caso real: el iPhone, al compartir de nuevo, reescribe fechas de la cabecera
+        # (atomo moov) y deja el audio (atomo mdat) igual. Tiene que reconocerse igual.
+        def m4a(audio: bytes, fecha: bytes) -> bytes:
+            atomo = lambda tipo, datos: (8 + len(datos)).to_bytes(4, "big") + tipo + datos
+            return atomo(b"ftyp", b"M4A ") + atomo(b"mdat", audio) + atomo(b"moov", fecha)
+        primera = entrada / "Reu otra 02.01.36.m4a"
+        primera.write_bytes(m4a(b"voz" * 300, b"fecha-1"))
+        trabajo = {"ramo": "REUNIÓN", "fecha": "2036-01-02", "archivos": [str(primera)]}
+        archivar_audio(trabajo, "Otra", {"rutas": {"procesados": str(base / "Procesados")}})
+        reenviada = entrada / "Reu otra 02.01.36.m4a"
+        reenviada.write_bytes(m4a(b"voz" * 300, b"fecha-2"))
+        editada = entrada / "Reu otra editada.m4a"
+        editada.write_bytes(m4a(b"vos" * 300, b"fecha-1"))
+        quedan, ya = deteccion.apartar_ya_procesadas([reenviada, editada])
+        check("reenviada desde el iPhone, con otra fecha en la cabecera, se reconoce",
+              quedan == [editada] and len(ya) == 1, str(quedan))
+    finally:
+        huellas.REGISTRO, deteccion.CARPETA_COPIAS = orig_registro, orig_carpeta
+        shutil.rmtree(base, ignore_errors=True)
 
 
 def probar_la_secretaria_avisa_si_la_sesion_caduco() -> None:
