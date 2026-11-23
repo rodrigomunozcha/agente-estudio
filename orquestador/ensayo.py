@@ -156,7 +156,7 @@ async def ensayar(slug: str, conservar: bool = False) -> Path:
     import json
 
     from .config import cargar_config
-    from .finalizar_clase import procesar_clase_reconocida
+    from .finalizar_clase import procesador_de
 
     ruta_metadata = PENDIENTES_DIR_POR_DEFECTO / f"{slug}.json"
     if not ruta_metadata.is_file():
@@ -173,7 +173,7 @@ async def ensayar(slug: str, conservar: bool = False) -> Path:
     print("Nada de esto toca tu vault ni tus audios.\n")
 
     try:
-        await procesar_clase_reconocida(trabajo_metadata, config_ensayo)
+        await procesador_de(trabajo_metadata)(trabajo_metadata, config_ensayo)
         _resumen(sandbox)
     finally:
         usar_dir_pendientes(None)

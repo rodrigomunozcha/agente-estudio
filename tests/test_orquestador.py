@@ -2032,6 +2032,44 @@ def probar_reunion_de_la_practica_y_su_mapa() -> None:
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_el_ensayo_de_una_reunion_sigue_su_camino() -> None:
+    """
+    El 22-11-2026 el ensayo de una reunion la proceso como clase: ensayo.py llamaba
+    siempre a la etapa de clases, y el camino real de las reuniones quedaba sin probar.
+    Ahora los dos eligen con finalizar_clase.procesador_de. Y una reunion ensayada no
+    avisa al Telegram real.
+    """
+    print("\n== el ensayo de una reunion sigue su camino ==")
+    from orquestador import finalizar_clase as fc
+    from orquestador import reuniones as rn
+
+    check("una reunion va a su propia etapa", fc.procesador_de({"ramo": rn.RAMO}) is rn.procesar_reunion)
+    check("una clase va a la de clases", fc.procesador_de({"ramo": "RAMO"}) is fc.procesar_clase_reconocida)
+    fuente = (RAIZ / "orquestador" / "ensayo.py").read_text(encoding="utf-8")
+    check("el ensayo elige igual que la corrida real", "procesador_de(trabajo_metadata)" in fuente)
+
+    base = Path(tempfile.mkdtemp(prefix="ensayo_reunion_"))
+    config = {"rutas": {"vault_obsidian": str(base / "vault"), "output": str(base / "Output"),
+                        "procesados": str(base / "Procesados"), "reuniones_practica": str(base / "Real")},
+              ensayo.CLAVE: True}
+    avisos = []
+    originales = (rn.notificar_reunion, rn.evaluaciones.RUTA)
+    rn.notificar_reunion = lambda *a, **k: avisos.append(a)
+    rn.evaluaciones.RUTA = base / "evaluaciones.json"
+    rn.evaluaciones.guardar({"ramos": {}, "pendientes": []})
+    try:
+        _, hoja = rn.guardar({"titulo": "Agenda", "tipo": "reunion", "practica": True, "resumen": "Hablamos.",
+                              "decisiones": [], "acciones": [], "seguimientos": [], "preguntas_abiertas": [],
+                              "entrevista": None, "investigar": [], "memoria": [], "mapa_empresa": []},
+                             "2036-01-01", "Reu agenda.m4a", config, "texto", "<p>cuerpo</p>", None)
+        check("en ensayo no avisa por Telegram", avisos == [], str(avisos))
+        check("y la hoja queda en el sandbox, no en la carpeta real",
+              base / "Output" in hoja.parents and not (base / "Real").exists(), str(hoja))
+    finally:
+        rn.notificar_reunion, rn.evaluaciones.RUTA = originales
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def probar_hallazgos_de_la_revision_de_reuniones() -> None:
     """
     Lo que encontro la revision independiente del 05-11-2026: un mapa ilegible no se

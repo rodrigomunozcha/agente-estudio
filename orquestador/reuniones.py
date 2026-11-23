@@ -776,8 +776,10 @@ def guardar(datos: dict, fecha: str, nombre: str, config: dict, transcripcion: s
     if motivo:
         print(f"[reuniones] {datos['titulo']}: la hoja salió sin explicación ({motivo})", flush=True)
     anotadas = anotar_acciones(datos, fecha, es_ensayo(config))
-    notificar_reunion(datos["titulo"], resumen_telegram(datos, anotadas, mapa, motivo), hoja)
+    # Un ensayo no avisa: el aviso llega al Telegram real y no se distingue de una
+    # reunion procesada de verdad. Lo que dejo el ensayo lo muestra ensayo.py al terminar.
     if not es_ensayo(config):
+        notificar_reunion(datos["titulo"], resumen_telegram(datos, anotadas, mapa, motivo), hoja)
         for a in datos["acciones"]:
             url = (enlace_calendario(a, datos["titulo"])
                    if a.get("evento") is True and a.get("respaldada") else None)

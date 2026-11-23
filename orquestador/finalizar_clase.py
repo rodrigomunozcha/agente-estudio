@@ -280,6 +280,14 @@ async def _redactar_hoja(
     return cuerpo, motivo
 
 
+def procesador_de(trabajo_metadata: dict):
+    """La etapa que procesa este trabajo. Una reunion no es clase: tiene su propio
+    analisis (ver reuniones.py). Vive aca y no dentro del bucle porque ensayo.py
+    tambien la usa: llamaba siempre a la de clases, y el 22-11-2026 ensayo una
+    reunion como si fuera clase, sin probar el camino real de las reuniones."""
+    return reuniones.procesar_reunion if trabajo_metadata["ramo"] == reuniones.RAMO else procesar_clase_reconocida
+
+
 async def procesar_clase_reconocida(trabajo_metadata: dict, config: dict, bitacora=None) -> Path:
     ruta_texto = trabajo_metadata["archivo_texto"]
     ramo = trabajo_metadata["ramo"]
@@ -462,10 +470,7 @@ async def procesar_pendientes_reconocidos(config: dict | None = None, bitacora=N
             continue  # audio dificil: la procesa nocturna.py despues de transcribirla con large-v3
 
         try:
-            # Una reunion no es clase: tiene su propio analisis (ver reuniones.py).
-            procesar = (reuniones.procesar_reunion if trabajo_metadata["ramo"] == reuniones.RAMO
-                        else procesar_clase_reconocida)
-            ruta_hoja = await procesar(trabajo_metadata, config, bitacora)
+            ruta_hoja = await procesador_de(trabajo_metadata)(trabajo_metadata, config, bitacora)
         except Exception as e:
             contexto = f"{trabajo_metadata['ramo']} - {trabajo_metadata['fecha']}"
             notificar_error(contexto, f"{type(e).__name__}: {e}")
